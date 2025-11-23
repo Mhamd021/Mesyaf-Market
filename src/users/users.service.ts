@@ -1,5 +1,5 @@
 // src/users/users.service.ts
-import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -10,9 +10,17 @@ import * as bcrypt from 'bcrypt';
 @Injectable()
 export class UsersService {
   constructor(private prisma: PrismaService) { }
-
-  create(data: CreateUserDto) {
-    return this.prisma.user.create({ data });
+ 
+  async create(data: CreateUserDto) {
+    const user =  await this.prisma.user.create({
+       data: {
+      ...data,
+      role: data.role ?? 'CUSTOMER',
+    },
+    
+      });
+      return user;
+      
   }
 
   findAll() {
@@ -55,13 +63,12 @@ export class UsersService {
     });
   }
 
- async updateProfile(id: number, data: UpdateUserDto, currentUser: any) {
-  // Ensure user can only update their own profile
+ async updateProfile(id: number, data: UpdateUserDto, currentUser: any) 
+ {
   if (id !== currentUser.userId && currentUser.role !== Role.ADMIN) {
     throw new ForbiddenException('You can only update your own profile');
   }
 
-  // Extra: strip out role unless admin
   if (data.role && currentUser.role !== Role.ADMIN) {
     delete data.role;
   }
@@ -70,10 +77,6 @@ export class UsersService {
 }
 
 
-
-  updateRole(id: number, role: Role) {
-    return this.prisma.user.update({ where: { id }, data: { role } });
-  }
 
  async remove(id: number, currentUser: any, password: string) {
   if (currentUser.role !== Role.ADMIN && currentUser.userId !== id) {

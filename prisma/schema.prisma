@@ -48,7 +48,10 @@ model VendorProfile {
   longitude   Float?    // For map display and proximity filtering
   isVerified  Boolean   @default(false)
   isActive    Boolean  @default(true)
-  rating      Float?    @default(0) // Calculated from product reviews
+  demotionReason String?   // e.g. 'vacation', 'payment', 'fraud'
+  suspendedAt   DateTime?  // when vendor was suspended
+  reactivatedAt DateTime?  // when vendor was reactivated
+  rating      Float?    @default(0) 
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -68,10 +71,9 @@ model Product {
   stockQuantity  Int       @default(0)
   condition      Condition @default(NEW)
   isAvailable    Boolean   @default(true)
-  views          Int       @default(0) // Tracks how many times product is viewed
+  views          Int       @default(0)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
-
   vendor         VendorProfile @relation(fields: [vendorId], references: [id])
   category       Category      @relation(fields: [categoryId], references: [id])
   images         ProductImage[]
@@ -87,12 +89,15 @@ model Category {
 
 
 model ProductImage {
-  id        Int      @id @default(autoincrement())
+  id        Int     @id @default(autoincrement())
   productId Int
   url       String
   altText   String?
-  product   Product  @relation(fields: [productId], references: [id])
+  product   Product @relation(fields: [productId], references: [id])
 }
+
+
+
 
 model ProductTag {
   id        Int       @id @default(autoincrement())

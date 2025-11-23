@@ -1,6 +1,6 @@
 import { IsArray, ArrayNotEmpty, IsInt } from 'class-validator';
 
-export class AttachTagsDto {
+export class RemoveTagsDto {
   @IsArray()
   @ArrayNotEmpty()
   @IsInt({ each: true })
