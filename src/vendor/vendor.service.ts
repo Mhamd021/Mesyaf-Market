@@ -4,6 +4,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { Role } from '../common/enums/role.enum';
 import { UpdateVendorProfileDto } from './dto/update-vendor-profile.dto';
 import { ResponseService } from 'src/common/services/response.service';
+import { OrderStatus } from '@prisma/client';
+
 
 @Injectable()
 export class VendorService 
@@ -74,32 +76,7 @@ return this.response.success('Vendor profile updated successfully', updated);
 
 }
 
-async verifyVendorById(vendorId: number, status: boolean, currentUserRole: Role) {
-  if (currentUserRole !== Role.ADMIN) {
-    throw new ForbiddenException('Only admins can verify vendor profiles');
-  }
-  const profile = await this.prisma.vendorProfile.findUnique({
-    where: { id: vendorId },
-    include: { user: true },
-  });
-  if (!profile) {
-    throw new NotFoundException('Vendor profile not found');
-  }
-  const updatedProfile = await this.prisma.vendorProfile.update({
-    where: { id: vendorId },
-    data: { isVerified: status },
-  });
-  if (status) {
-    await this.prisma.user.update({
-      where: { id: profile.userId },
-      data: { role: Role.VENDOR },
-    });
-  }
-  return this.response.success(
-    'Vendor profile verification updated successfully',
-    updatedProfile,
-  );
-}
+
 
 async deleteProfile(userId: number, currentUserRole: Role) {
   const profile = await this.prisma.vendorProfile.findUnique({ where: { userId } });
@@ -211,7 +188,30 @@ async requestPromotionOrReactivation(userId: number, currentUserRole: Role) {
 }
 
 
+async getVendorOrders(userId: number, orderStatus?: OrderStatus) {
+  const vendorProfile = await this.prisma.vendorProfile.findUnique({
+    where: { userId },
+  });
 
+  if (!vendorProfile) {
+    throw new NotFoundException('Vendor profile not found');
+  }
+
+  const whereClause: any = {
+    vendorId: vendorProfile.id,
+    ...(orderStatus ? { status: orderStatus } : {}),
+  };
+
+  return this.prisma.order.findMany({
+    where: whereClause,
+    include: {
+      orderItems: {
+        include: { product: true },
+      },
+      customer: true,
+    },
+  });
+}
 
 
 }

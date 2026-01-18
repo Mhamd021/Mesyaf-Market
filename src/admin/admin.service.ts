@@ -2,10 +2,16 @@ import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/commo
 import { PrismaService } from '../prisma/prisma.service';
 import { Role } from '../common/enums/role.enum';
 import { ResponseService } from '../common/services/response.service';
+import { UsersService } from 'src/users/users.service';
 
 @Injectable()
 export class AdminService {
-  constructor(private prisma: PrismaService, private response: ResponseService) {}
+  constructor(private prisma: PrismaService, private response: ResponseService,private usersService: UsersService,) {}
+
+
+  async getAllUsers() {
+    return this.usersService.findAll();
+  }
 
   async updateUserRole(id: number, role: Role, reason?: string) {
   const user = await this.prisma.user.findUnique({ where: { id }, include: { vendorProfile: true } });
@@ -69,5 +75,44 @@ async getPendingVendors() {
   return this.response.success('Pending vendor applications retrieved successfully', pending);
 }
 
+//deliverer management functions 
+async promoteUserToDeliverer(userId: number) {
+  const user = await this.prisma.user.findUnique({ where: { id: userId } });
+  if (!user) throw new NotFoundException('User not found');
+
+  // Update role
+  await this.prisma.user.update({
+    where: { id: userId },
+    data: { role: Role.DELIVERER },
+  });
+
+  // Create profile with fixed defaults
+  const profile = await this.prisma.delivererProfile.create({
+    data: {
+      userId,
+      maxConcurrentOrders: 3,
+      maxStops: 5,
+      acceptsBatching: true,
+    },
+  });
+
+  return this.response.success('User promoted to Deliverer and profile created', profile);
+}
+
+async removeDeliverer(userId: number) {
+  const profile = await this.prisma.delivererProfile.findUnique({ where: { userId } });
+  if (!profile) throw new NotFoundException('Deliverer profile not found');
+
+  // Delete profile
+  await this.prisma.delivererProfile.delete({ where: { userId } });
+
+  // Demote user back to CUSTOMER
+  await this.prisma.user.update({
+    where: { id: userId },
+    data: { role: Role.CUSTOMER },
+  });
+
+  return this.response.success('Deliverer removed and user demoted to Customer');
+}
 
 }

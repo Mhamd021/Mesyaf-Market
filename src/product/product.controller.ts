@@ -62,7 +62,7 @@ export class ProductController {
     async getMyProducts
     (
        @Req() req,
-     @Query() filter: ProductFilterDto
+      @Query() filter: ProductFilterDto
 
 ) {
         return this.productService.getVendorProductsByUser(req.user.id,filter);

@@ -7,7 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
 enum Role {
   ADMIN
   VENDOR
@@ -20,65 +19,97 @@ enum Condition {
   USED
 }
 
+enum OrderType {
+  FOOD
+  GROCERY
+  VEGETABLE
+  EMPTY
+}
+
+enum OrderStatus {
+  PENDING_VENDOR_CONFIRMATION
+  VENDOR_ACCEPTED
+  VENDOR_REJECTED
+  READY_FOR_DELIVERY
+  WAITING_FOR_DELIVERER
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum JobStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
 
 model User {
   id           Int      @id @default(autoincrement())
-  name         String  
+  name         String
   email        String   @unique
   password     String
   role         Role     @default(CUSTOMER)
-  profileImage String?  
-  phoneNumber  String?  
-  address      String?  
+  profileImage String?
+  phoneNumber  String?
+  address      String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  vendorProfile VendorProfile?
-
+  vendorProfile    VendorProfile?
+  delivererProfile DelivererProfile?
+  orders           Order[]           @relation("CustomerOrders")
 }
 
 model VendorProfile {
-  id          Int      @id @default(autoincrement())
-  userId      Int      @unique
-  shopName    String
-  coverImage  String?   // Optional banner or logo
-  description String?   // Optional about/shop info
-  address     String?   // Human-readable address
-  latitude    Float?    // For map display and proximity filtering
-  longitude   Float?    // For map display and proximity filtering
-  isVerified  Boolean   @default(false)
-  isActive    Boolean  @default(true)
-  demotionReason String?   // e.g. 'vacation', 'payment', 'fraud'
-  suspendedAt   DateTime?  // when vendor was suspended
-  reactivatedAt DateTime?  // when vendor was reactivated
-  rating      Float?    @default(0) 
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id             Int       @id @default(autoincrement())
+  userId         Int       @unique
+  shopName       String
+  coverImage     String?
+  description    String?
+  address        String?
+  latitude       Float?
+  longitude      Float?
+  isVerified     Boolean   @default(false)
+  isActive       Boolean   @default(true)
+  demotionReason String?
+  suspendedAt    DateTime?
+  reactivatedAt  DateTime?
+  rating         Float?    @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
+  user     User      @relation(fields: [userId], references: [id])
+  products Product[]
+  orders   Order[]   @relation("VendorOrders")
 
-  user        User      @relation(fields: [userId], references: [id])
-  products    Product[]
+  @@index([isActive, isVerified])
 }
 
 model Product {
-  id             Int       @id @default(autoincrement())
-  vendorId       Int
-  categoryId     Int
-  name           String
-  description    String?
-  price          Float
-  discountPrice  Float?    // Optional discounted price
-  stockQuantity  Int       @default(0)
-  condition      Condition @default(NEW)
-  isAvailable    Boolean   @default(true)
-  views          Int       @default(0)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  vendor         VendorProfile @relation(fields: [vendorId], references: [id])
-  category       Category      @relation(fields: [categoryId], references: [id])
-  images         ProductImage[]
-  tags           ProductTag[] @relation("ProductTags")
+  id            Int            @id @default(autoincrement())
+  vendorId      Int
+  categoryId    Int
+  name          String
+  description   String?
+  price         Float
+  discountPrice Float?
+  stockQuantity Int            @default(0)
+  condition     Condition      @default(NEW)
+  isAvailable   Boolean        @default(true)
+  isInstant     Boolean?
+  prepTimeMin   Int?
+  views         Int            @default(0)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  vendor        VendorProfile  @relation(fields: [vendorId], references: [id])
+  category      Category       @relation(fields: [categoryId], references: [id])
+  images        ProductImage[]
+  orderItems    OrderItem[]
+  tags          ProductTag[]   @relation("ProductTags")
 
+  @@index([vendorId])
+  @@index([categoryId])
+  @@index([isAvailable])
 }
 
 model Category {
@@ -87,22 +118,144 @@ model Category {
   products Product[]
 }
 
-
 model ProductImage {
   id        Int     @id @default(autoincrement())
   productId Int
   url       String
   altText   String?
   product   Product @relation(fields: [productId], references: [id])
+
+  @@index([productId])
 }
-
-
-
 
 model ProductTag {
-  id        Int       @id @default(autoincrement())
-  name      String    @unique
-  products  Product[] @relation("ProductTags")
+  id       Int       @id @default(autoincrement())
+  name     String    @unique
+  products Product[] @relation("ProductTags")
 }
 
+model DelivererProfile {
+  id     Int @id @default(autoincrement())
+  userId Int @unique
+  currentLat Float?
+  currentLng Float?
+  availability Boolean @default(true)
+  maxConcurrentOrders Int     @default(3)
+  maxStops            Int     @default(5)
+  acceptsBatching     Boolean @default(true)
 
+  // Active job reference
+  activeJobId Int?         @unique
+  activeJob   DeliveryJob? @relation("ActiveJob", fields: [activeJobId], references: [id])
+
+  // Relations
+  user            User            @relation(fields: [userId], references: [id])
+  jobs            DeliveryJob[]   @relation("DelivererJobs")
+  orders          Order[]         @relation("DelivererOrders")
+  deliveryBatches DeliveryBatch[]
+
+  @@index([availability])
+  @@index([availability, currentLat, currentLng])
+}
+
+model Order {
+  id                Int         @id @default(autoincrement())
+  vendorId          Int
+  customerId        Int
+  status            OrderStatus @default(PENDING_VENDOR_CONFIRMATION)
+  orderType         OrderType   @default(EMPTY)
+  estimatedPrepTime Int?
+  readyAt           DateTime?
+  pickedAt          DateTime?
+  deliveredAt       DateTime?
+  createdAt       DateTime  @default(now())
+  deliveryFee       Int?
+  delivererId       Int?
+  deliveryJobId     Int?
+  deliveryBatchId   Int?
+  vendorAddress     String?
+  vendorLat         Float?
+  vendorLng         Float?
+  customerAddress   String?
+  customerLat       Float?
+  customerLng       Float?
+  distanceKm        Float?
+
+  vendor        VendorProfile     @relation("VendorOrders", fields: [vendorId], references: [id])
+  customer      User              @relation("CustomerOrders", fields: [customerId], references: [id])
+  deliverer     DelivererProfile? @relation("DelivererOrders", fields: [delivererId], references: [id])
+  deliveryJob   DeliveryJob?      @relation("JobOrders", fields: [deliveryJobId], references: [id])
+  deliveryBatch DeliveryBatch?    @relation("BatchOrders", fields: [deliveryBatchId], references: [id])
+  orderItems    OrderItem[]
+  deliveryStops DeliveryDropOff[] @relation("OrderStops")
+
+  @@index([vendorId])
+  @@index([customerId])
+  @@index([status])
+  @@index([delivererId])
+  @@index([deliveryJobId])
+  @@index([deliveryBatchId])
+}
+
+model OrderItem {
+  id        Int   @id @default(autoincrement())
+  orderId   Int
+  productId Int
+  quantity  Int
+  price     Float
+
+  order   Order   @relation(fields: [orderId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model DeliveryDropOff {
+  id          Int       @id @default(autoincrement())
+  jobId       Int
+  orderId     Int
+  sequence    Int // stop index in route
+  status      JobStatus @default(PENDING)
+  dropoffLat  Float?
+  dropoffLng  Float?
+  completedAt DateTime?
+
+  job   DeliveryJob @relation(fields: [jobId], references: [id])
+  order Order       @relation("OrderStops", fields: [orderId], references: [id])
+}
+
+model DeliveryJob {
+  id              Int       @id @default(autoincrement())
+  delivererId     Int
+  status          JobStatus @default(PENDING)
+  assignedAt      DateTime  @default(now())
+  startedAt       DateTime?
+  completedAt     DateTime?
+  routeJson       Json? // coordinates or steps
+  totalDistanceKm Float?
+  totalOrders     Int?
+
+  // Relations
+  deliverer DelivererProfile  @relation("DelivererJobs", fields: [delivererId], references: [id])
+  stops     DeliveryDropOff[]
+  activeOn  DelivererProfile? @relation("ActiveJob")
+  orders    Order[]           @relation("JobOrders")
+
+  @@index([delivererId])
+  @@index([status])
+}
+
+model DeliveryBatch {
+  id              Int       @id @default(autoincrement())
+  delivererId     Int?
+  status          JobStatus @default(PENDING)
+  batchFee        Int?
+  batchDiscount   Int?
+  totalDistanceKm Float?
+  createdAt       DateTime  @default(now())
+
+  // Relations
+  deliverer DelivererProfile? @relation(fields: [delivererId], references: [id])
+  orders    Order[]          @relation("BatchOrders")
+
+  @@index([delivererId])
+  @@index([status])
+}

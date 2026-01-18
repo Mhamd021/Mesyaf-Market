@@ -35,45 +35,46 @@ export class ProductService {
   }
 
   //fetch products for a vendor
-  private async fetchProductsForVendor(vendorId: number , filter: ProductFilterDto) 
-  {
-   const { categoryId, tagIds, search, page = 1, limit = 10 } = filter;
-
-const where: any = {
-  vendorId,
-  isActive: true,
-  ...(categoryId && { categoryId }),
-  ...(search && { name: { contains: search, mode: 'insensitive' } }),
-  ...(tagIds?.length && {
-    tags: { some: { id: { in: tagIds } } },
-  }),
-};
-
-const [products, total] = await this.prisma.$transaction([
-  this.prisma.product.findMany({
-    where,
-    skip: (page - 1) * limit,
-    take: limit,
-    include: {
-      category: true,
-      images: true,
-      tags: true,
-    },
-    orderBy: { createdAt: 'desc' },
-  }),
-  this.prisma.product.count({ where }),
-]);
-
-return {
-  success: true,
-  message: 'Vendor products fetched successfully',
-  data: products,
-  count: total,
-  page,
-  limit,
-};
-
+  private async fetchProductsForVendor(vendorId: number, filter: ProductFilterDto) {
+  // Check vendor profile status
+  const vendor = await this.prisma.vendorProfile.findUnique({
+    where: { id: vendorId },
+    select: { isActive: true, isVerified: true },
+  });
+  if (!vendor) throw new NotFoundException('Vendor profile not found');
+  if (!vendor.isActive || !vendor.isVerified) {
+    throw new ForbiddenException('Vendor profile is inactive or not verified');
   }
+
+  const { categoryId, tagIds, search, page = 1, limit = 10 } = filter;
+
+  const where: any = {
+    vendorId,
+    isAvailable: true,
+    ...(categoryId && { categoryId }),
+    ...(search && { name: { contains: search, mode: 'insensitive' } }),
+    ...(tagIds?.length && { tags: { some: { id: { in: tagIds } } } }),
+  };
+
+  const [products, total] = await this.prisma.$transaction([
+    this.prisma.product.findMany({
+      where,
+      skip: (page - 1) * limit,
+      take: limit,
+      include: { category: true, images: true, tags: true },
+      orderBy: { createdAt: 'desc' },
+    }),
+    this.prisma.product.count({ where }),
+  ]);
+
+  return this.response.success('Vendor products fetched successfully', {
+    data: products,
+    count: total,
+    page,
+    limit,
+  });
+}
+
 
   //create product
   async createProduct(userId: number, dto: CreateProductDto) {
@@ -169,7 +170,7 @@ return {
   const { categoryId, tagIds, search, page = 1, limit = 10 } = filter;
 
   const where: any = {
-    isActive: true,
+    isAvailable : true,
     vendor: { isActive: true, isVerified: true },
     ...(categoryId && { categoryId }),
     ...(search && { name: { contains: search, mode: 'insensitive' } }),
@@ -208,10 +209,13 @@ return {
   async getVendorProductsByUser(userId: number, filter: ProductFilterDto) {
   const vendor = await this.prisma.vendorProfile.findUnique({
     where: { userId },
-    select: { id: true, isActive: true },
+    select: { id: true, isActive: true, isVerified: true },
   });
   if (!vendor) throw new NotFoundException('Vendor profile not found');
-  if (!vendor.isActive) throw new ForbiddenException('Vendor profile inactive');
+ if (!vendor.isActive || !vendor.isVerified) {
+  throw new ForbiddenException('Vendor profile inactive or not verified');
+}
+
   return this.fetchProductsForVendor(vendor.id, filter);
 }
 

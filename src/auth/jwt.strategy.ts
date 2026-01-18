@@ -12,7 +12,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: any) {
-  console.log('Decoded JWT payload:', payload);
+  
   return { id: payload.sub, email: payload.email, role: payload.role };
 }
 

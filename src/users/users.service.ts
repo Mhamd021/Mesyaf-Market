@@ -5,11 +5,14 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { Role } from '../common/enums/role.enum';
 import * as bcrypt from 'bcrypt';
+import { ResponseService } from 'src/common/services/response.service';
+import {  OrderStatus } from '@prisma/client';
+
 
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService, private response:ResponseService) { }
  
   async create(data: CreateUserDto) {
     const user =  await this.prisma.user.create({
@@ -23,8 +26,8 @@ export class UsersService {
       
   }
 
-  findAll() {
-    return this.prisma.user.findMany({
+ async findAll() {
+    const users =  await this.prisma.user.findMany({
         select: {
         id: true,
         email: true,
@@ -37,6 +40,7 @@ export class UsersService {
         updatedAt: true,
       },
     });
+    return this.response.success('Users fetched successfully',users);
   }
 
   findOne(id: number) {
@@ -93,5 +97,22 @@ export class UsersService {
     }
   }
   return this.prisma.user.delete({ where: { id } });
+}
+
+async getUserOrders(userId: number,OrderStatus?:OrderStatus) 
+{
+  const whereClause: any = { customerId: userId };
+  if (OrderStatus) {
+    whereClause.status = OrderStatus;
+  }
+  return this.prisma.order.findMany({
+    where: whereClause,
+    include: {
+      orderItems: {
+        include: { product: true }
+      }
+    },
+    
+  });
 }
 }
