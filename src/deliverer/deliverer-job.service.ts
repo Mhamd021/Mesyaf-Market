@@ -2,13 +2,14 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { PrismaService } from '../prisma/prisma.service';
 import { ResponseService } from '../common/services/response.service';
 import { JobStatus, OrderStatus } from '@prisma/client';
+import { EventLogService } from 'src/common/events/event-log.service';
+import { EVENTS } from 'src/common/events/events.constants';
 
 @Injectable()
 export class DelivererJobService {
 
-    //time to send the changes with websocket in here as well
 
-    constructor(private readonly prisma: PrismaService,private response: ResponseService) {}
+    constructor(private readonly prisma: PrismaService,private readonly response: ResponseService,private readonly eventLogService:EventLogService) {}
 
 async startJob(jobId: number, delivererId: number) 
   {
@@ -22,8 +23,8 @@ async startJob(jobId: number, delivererId: number)
   if (job.delivererId !== delivererId)
     throw new ForbiddenException('Not your job');
 
-  if (job.status !== JobStatus.PENDING)
-    throw new BadRequestException('Job already started');
+  if (job.status !== JobStatus.ASSIGNED)
+    throw new BadRequestException('Job not ready to start');
 
   await this.prisma.deliveryJob.update({
     where: { id: jobId },
@@ -37,6 +38,16 @@ async startJob(jobId: number, delivererId: number)
     where: { deliveryJobId: jobId },
     data: {
       status: OrderStatus.IN_PROGRESS,
+    },
+  });
+
+  await this.eventLogService.recordEvent({
+    entityType: 'JOB',
+    entityId: jobId,
+    eventType: EVENTS.JOB.STARTED,
+    payload: {
+      jobId,
+      status: EVENTS.JOB.STARTED,
     },
   });
 
@@ -112,6 +123,17 @@ async completeJob(jobId: number, delivererId: number)
   },
 });
 
+  
+
+  await this.eventLogService.recordEvent({
+  entityType: 'JOB',
+  entityId: jobId,
+  eventType: EVENTS.JOB.COMPLETED,
+  payload: {
+    jobId,
+    status: EVENTS.JOB.COMPLETED,
+  },
+});
 
   return { success: true };
 }
@@ -127,13 +149,32 @@ async completeDropOff(jobId: number, dropOffId: number, delivererId: number) {
   if (job.status !== JobStatus.IN_PROGRESS)
     throw new BadRequestException('Job not in progress');
 
-  await this.prisma.deliveryDropOff.update({
+const dropOff =  await this.prisma.deliveryDropOff.update({
     where: { id: dropOffId },
     data: {
       status: JobStatus.COMPLETED,
       completedAt: new Date(),
     },
   });
+
+  await this.prisma.order.update({
+  where: { id: dropOff.orderId },
+  data: {
+    status: OrderStatus.COMPLETED,
+    deliveredAt: new Date(),
+  },
+});
+
+await this.eventLogService.recordEvent({
+      entityType: 'ORDER',
+      entityId: dropOff.orderId,
+      eventType : EVENTS.ORDER.COMPLETED,
+      payload : 
+      {
+        orderId: dropOff.orderId,
+        status : EVENTS.ORDER.COMPLETED
+      }
+});
 
   const remainingStops = await this.prisma.deliveryDropOff.findMany({
     where: {
@@ -151,5 +192,37 @@ async completeDropOff(jobId: number, dropOffId: number, delivererId: number) {
 }
 
 
+//deliverer and job gateway service functions:
+
+async getDelivererByUserId(userId: number) {
+  const deliverer = await this.prisma.delivererProfile.findUnique({
+    where: { userId },
+  });
+
+  if (!deliverer) {
+    throw new Error('Deliverer profile not found');
+  }
+
+  return deliverer;
+}
+
+async validateLiveTracking( jobId: number, delivererId: number,): Promise<boolean> 
+{
+  const job = await this.prisma.deliveryJob.findUnique({
+    where: { id: jobId },
+    select: {
+      delivererId: true,
+      status: true,
+    },
+  });
+
+  if (!job) return false;
+
+  if (job.delivererId !== delivererId) return false;
+
+  if (job.status !== 'IN_PROGRESS') return false;
+
+  return true;
+}
 
 }

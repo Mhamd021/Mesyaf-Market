@@ -6,7 +6,7 @@ import { JobStatus, OrderStatus } from '@prisma/client';
 
 @Injectable()
 export class DelivererService {
-  constructor(private readonly prisma: PrismaService,private response: ResponseService) {}
+  constructor(private readonly prisma: PrismaService,private readonly response: ResponseService) {}
 
   async getProfileByUserId(userId: number) 
   {

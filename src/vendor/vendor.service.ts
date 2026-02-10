@@ -5,15 +5,21 @@ import { Role } from '../common/enums/role.enum';
 import { UpdateVendorProfileDto } from './dto/update-vendor-profile.dto';
 import { ResponseService } from 'src/common/services/response.service';
 import { OrderStatus } from '@prisma/client';
+import { CustomerGateway } from 'src/users/customer.gateway';
+import { EVENTS } from 'src/common/events/events.constants';
+import { EventLogService } from 'src/common/events/event-log.service';
 
+// if (!vendor || vendor.id != order.vendorId) this logic is repeated
 
 @Injectable()
 export class VendorService 
 {
     constructor
     (
-      private prisma: PrismaService,
-      private response: ResponseService
+      private readonly prisma: PrismaService,
+      private readonly response: ResponseService,
+      private readonly costumerGateway: CustomerGateway,
+      private readonly eventLogService: EventLogService,
     ) 
   {}
     
@@ -44,8 +50,7 @@ export class VendorService
 }
 
 
-async getProfileByUserId(userId: number) 
-{
+async getProfileByUserId(userId: number) {
   const profile = await this.prisma.vendorProfile.findFirst({
     where: {
       userId,
@@ -55,9 +60,10 @@ async getProfileByUserId(userId: number)
   });
 
   if (!profile) {
-  throw new NotFoundException('Vendor profile not found');
-}
-  return this.response.success('Vendor profile retrieved successfully', profile);
+    throw new NotFoundException('Vendor profile not found');
+  }
+
+  return profile; 
 }
 
 
@@ -157,7 +163,6 @@ async requestPromotionOrReactivation(userId: number, currentUserRole: Role) {
   });
   if (!user) throw new NotFoundException('User not found');
 
-  // Case 1: Customer requesting promotion
   if (user.role === Role.CUSTOMER) {
     if (!user.vendorProfile) {
       throw new NotFoundException('No vendor profile exists for this user');
@@ -166,13 +171,12 @@ async requestPromotionOrReactivation(userId: number, currentUserRole: Role) {
       where: { userId },
       data: {
         demotionReason: null,
-        isVerified: false, // pending admin approval
+        isVerified: false, 
         isActive: true,
       },
     });
   }
 
-  // Case 2: Vendor reactivating inactive store
   if (user.role === Role.VENDOR && user.vendorProfile?.isActive === false) {
     return this.prisma.vendorProfile.update({
       where: { userId },
@@ -211,6 +215,89 @@ async getVendorOrders(userId: number, orderStatus?: OrderStatus) {
       customer: true,
     },
   });
+}
+  async vendorAcceptOrder(orderId: number, userId: number) 
+  {
+      const vendor = await this.prisma.vendorProfile.findUnique({
+        where: { userId: userId },
+      });
+      if(!vendor)
+        {
+          throw new Error('Vendor profile not found');
+        }
+  const order = await this.prisma.order.findUnique({
+    where: { id: orderId },
+  });
+
+  if (!order || order.vendorId !== vendor.id) {
+    throw new ForbiddenException('Unauthorized');
+  }
+
+  if (order.status !== OrderStatus.PENDING_VENDOR_CONFIRMATION) {
+    throw new Error('Order cannot be accepted in current status');
+  }
+
+ const updated = await this.prisma.order.update({
+    where: { id: orderId },
+    data: {
+      status: OrderStatus.VENDOR_ACCEPTED,
+    },
+  });
+
+
+  await this.eventLogService.recordEvent({
+  entityType: 'ORDER',
+  entityId: orderId,
+  eventType: EVENTS.ORDER.ACCEPTED,
+  payload: {
+    orderId,
+    status: EVENTS.ORDER.ACCEPTED,
+  },
+});
+  this.costumerGateway.sendOrderAccepted(order.customerId, orderId);
+
+
+  return updated;
+}
+
+    async vendorRejectOrder(orderId: number, userId: number) {
+      
+      const vendor = await this.prisma.vendorProfile.findUnique({
+        where: { userId: userId },
+      });
+      if(!vendor)
+        {
+          throw new Error('Vendor profile not found');
+        }
+  const order = await this.prisma.order.findUnique({
+    where: { id: orderId },
+  });
+
+  if (!order || order.vendorId !== vendor.id) {
+    throw new ForbiddenException('Unauthorized');
+  }
+  if (order.status !== OrderStatus.PENDING_VENDOR_CONFIRMATION) {
+    throw new Error('Order cannot be rejected in current status');
+  }
+  const  updated = await this.prisma.order.update({
+    where: { id: orderId },
+    data: {
+      status: OrderStatus.VENDOR_REJECTED,
+    },
+  });
+
+      await this.eventLogService.recordEvent({
+  entityType: 'ORDER',
+  entityId: orderId,
+  eventType: EVENTS.ORDER.REJECTED,
+  payload: {
+    orderId,
+    status: EVENTS.ORDER.REJECTED,
+  },
+});
+    this.costumerGateway.sendOrderRejected(order.customerId, orderId);
+
+  return updated;
 }
 
 

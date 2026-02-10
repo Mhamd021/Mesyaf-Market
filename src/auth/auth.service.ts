@@ -9,9 +9,9 @@ import { ResponseService } from 'src/common/services/response.service';
 @Injectable()
 export class AuthService {
   constructor(
-    private usersService: UsersService,
-    private jwtService: JwtService,
-    private response: ResponseService
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
+    private readonly response: ResponseService
   ) {}
 
   async register(dto: RegisterDto) 

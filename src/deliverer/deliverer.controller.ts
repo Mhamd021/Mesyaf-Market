@@ -27,7 +27,6 @@ export class DelivererController {
     return this.delivererService.getProfileByUserId(userId);
   }
 
-  // Deliverer updates their own location/availability
   @UseGuards(AuthGuard('jwt'), RolesGuard)
   @Roles(Role.DELIVERER)
   @Patch('me')
@@ -40,7 +39,8 @@ export class DelivererController {
 
  @Get('/jobs')
 @UseGuards(AuthGuard('jwt'))
-async getDelivererJobs(@Req() req, @Query('status') status?: JobStatus) {
+async getDelivererJobs(@Req() req, @Query('status') status?: JobStatus) 
+{
   return this.delivererJobService.getDelivererJobs(req.user.id, status);
 }
 

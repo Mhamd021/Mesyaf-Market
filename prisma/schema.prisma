@@ -39,8 +39,14 @@ enum OrderStatus {
 
 enum JobStatus {
   PENDING
+  ASSIGNED     
   IN_PROGRESS
   COMPLETED
+}
+
+enum EventEntityType {
+  ORDER
+  JOB
 }
 
 model User {
@@ -49,6 +55,8 @@ model User {
   email        String   @unique
   password     String
   role         Role     @default(CUSTOMER)
+  lastSeenAt  DateTime?
+  isOnline    Boolean  @default(false)
   profileImage String?
   phoneNumber  String?
   address      String?
@@ -224,7 +232,7 @@ model DeliveryDropOff {
 
 model DeliveryJob {
   id              Int       @id @default(autoincrement())
-  delivererId     Int
+  delivererId     Int?
   status          JobStatus @default(PENDING)
   assignedAt      DateTime  @default(now())
   startedAt       DateTime?
@@ -233,8 +241,8 @@ model DeliveryJob {
   totalDistanceKm Float?
   totalOrders     Int?
 
-  // Relations
-  deliverer DelivererProfile  @relation("DelivererJobs", fields: [delivererId], references: [id])
+
+  deliverer DelivererProfile? @relation("DelivererJobs",fields: [delivererId], references: [id])
   stops     DeliveryDropOff[]
   activeOn  DelivererProfile? @relation("ActiveJob")
   orders    Order[]           @relation("JobOrders")
@@ -259,3 +267,42 @@ model DeliveryBatch {
   @@index([delivererId])
   @@index([status])
 }
+
+model EventLog {
+  id          Int             @id @default(autoincrement())
+  entityType  EventEntityType
+  entityId    Int
+  eventType   String
+  payload     Json
+  createdAt   DateTime        @default(now())
+
+  @@index([entityType, entityId, createdAt])
+}
+
+model OrderTimeline {
+  id          Int       @id @default(autoincrement())
+  orderId     Int
+  eventType   String
+  status      OrderStatus?
+  message     String
+  payload     Json?   
+  occurredAt  DateTime
+
+  @@index([orderId])
+  @@index([occurredAt])
+}
+
+
+model JobTimeline {
+  id          Int      @id @default(autoincrement())
+  jobId       Int
+  eventType   String
+  message     String
+  payload     Json? 
+  occurredAt  DateTime
+
+  @@index([jobId])
+  @@index([occurredAt])
+}
+
+

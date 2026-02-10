@@ -2,84 +2,99 @@ import { WebSocketGateway, WebSocketServer, OnGatewayConnection, OnGatewayDiscon
 import { Server, Socket } from 'socket.io';
 import { Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { PrismaService } from 'src/prisma/prisma.service';
 import { DelivererJobService } from './deliverer-job.service';
+import { ReconnectService } from 'src/common/websocket/reconnect.service';
+import { SessionService } from 'src/common/websocket/session.service';
+import { ReplayService } from 'src/common/websocket/reply.service';
+
 
 @WebSocketGateway({ namespace: 'deliverer', cors: true })
-export class DelivererGateway implements OnGatewayConnection, OnGatewayDisconnect {
-
+export class DelivererGateway implements OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server: Server;
-
 
   private readonly logger = new Logger(DelivererGateway.name);
 
   constructor(
     private readonly jwtService: JwtService,
-    private readonly prisma: PrismaService,
-    private readonly delivererJobService: DelivererJobService,) { }
+    private readonly delivererJobService: DelivererJobService,
+    private readonly reconnectService: ReconnectService,
+    private readonly sessionService: SessionService,
+    private readonly replayService: ReplayService
+  ) {}
 
   async handleConnection(client: Socket) {
-    const token =
-      client.handshake.auth?.token ||
-      client.handshake.query?.token;
-
-    if (!token) {
-      client.disconnect();
-      return;
-    }
-
     try {
+      const token =
+        client.handshake.auth?.token ||
+        client.handshake.query?.token;
+
+      if (!token) return client.disconnect();
+
       const payload = this.jwtService.verify(token);
 
       if (payload.role !== 'DELIVERER') {
-        client.disconnect();
-        return;
+        return client.disconnect();
       }
 
-      const deliverer = await this.prisma.delivererProfile.findUnique({
-        where: { userId: payload.sub },
-      });
+      await this.sessionService.markOnline(payload.sub);
 
-      if (!deliverer) {
-        client.disconnect();
-        return;
-      }
+      
+     
 
-      client.data.delivererId = deliverer.id;
+      const deliverer = await this.delivererJobService.getDelivererByUserId(
+        payload.sub,
+      );
+    
+      client.data.userId = payload.sub;
+      client.data.delivererId = deliverer!.id;
 
-      client.emit('connected', {
-        message: 'Welcome deliverer',
-      });
+      client.join(`deliverer:${deliverer!.id}`);
 
-      const room = `deliverer:${deliverer.id}`;
-      client.join(room);
-      this.server.to(room).emit('room:test', {
-        message: 'You are inside the room',
-        room: room,
-      });
-      this.logger.log(`Deliverer ${deliverer.id} connected`);
-    } catch {
+      const context =
+      await this.reconnectService.getDelivererContext(deliverer!.id);
+
+    if (context?.data?.jobId) {
+      client.join(`job:${context?.data?.jobId}`);
+    }
+     
+    client.emit('session.context', {
+  session: {
+    role: 'DELIVERER',
+    entityId: deliverer.id,
+    },
+    ...context,
+  });
+
+    const missedEvents = await this.replayService.replayForDeliverer(deliverer.id);
+    if (missedEvents.length) {
+      client.emit('events.replay', missedEvents);
+    }
+
+    } catch (err) {
       client.disconnect();
     }
   }
 
+  async handleDisconnect(client: Socket) {
+  const userId = client.data.userId;
+  const delivererId = client.data.delivererId
+  if (!userId) return;
 
-  handleDisconnect(client: Socket) {
-    this.logger.log(`Client disconnected: ${client.id}`);
-  }
+  await this.sessionService.markOffline(userId);
+
+  this.logger.warn(`Deliverer ${delivererId} disconnected`);
+}
 
 
-
+  // 🔔 system event
   sendJobAssigned(delivererId: number, job: any) {
-    const room = `deliverer:${delivererId}`;
-    this.server.to(room).emit('job:assigned',
-      {
-        type: "JOB_ASSIGNED",
-        job,
-        timestamp: new Date()
-      });
-    this.logger.log(`Job assigned event sent to deliverer ${delivererId}`);
+    this.server.to(`deliverer:${delivererId}`).emit('job:assigned', {
+      event: 'JOB_ASSIGNED',
+      data: job,
+      timestamp: new Date(),
+    });
   }
 
   @SubscribeMessage('job:start')
@@ -87,34 +102,79 @@ export class DelivererGateway implements OnGatewayConnection, OnGatewayDisconnec
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { jobId: number },
   ) {
-
-    const delivererId = client.data.delivererId;
     try {
-      const result = await this.delivererJobService.startJob(data.jobId, delivererId);
-      client.emit('job:started', result);
+      const delivererId = client.data.delivererId;
+
+      await this.delivererJobService.startJob(
+        data.jobId,
+        delivererId,
+      );
+
+      client.emit('job:started', { jobId: data.jobId });
+
+      this.server
+        .to(`job:${data.jobId}`)
+        .emit('delivery:started', { jobId: data.jobId });
     } catch (err) {
       client.emit('job:error', { message: err.message });
     }
   }
 
   @SubscribeMessage('dropoff:complete')
-  async handleCompleteDropoff(@ConnectedSocket() client: Socket,
-    @MessageBody() data: { jobId: number; dropOffId: number },) 
-    {
-    const delivererId = client.data.delivererId;  
+  async handleCompleteDropoff(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { jobId: number; dropOffId: number },
+  ) {
     try {
-      const result = await this.delivererJobService.completeDropOff(data.jobId, data.dropOffId, delivererId);
+      const delivererId = client.data.delivererId;
+
+      const result =
+        await this.delivererJobService.completeDropOff(
+          data.jobId,
+          data.dropOffId,
+          delivererId,
+        );
+
       client.emit('dropoff:completed', result);
+
       if (result.jobCompleted) {
-        client.emit('job:completed', { jobId: data.jobId });
+        this.server
+          .to(`job:${data.jobId}`)
+          .emit('delivery:completed', { jobId: data.jobId });
       }
-    }
-    catch (err) 
-    {
+    } catch (err) {
       client.emit('dropoff:error', { message: err.message });
     }
-
-
   }
 
+  @SubscribeMessage('location:update')
+  async handleLocationUpdate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: { jobId: number; lat: number; lng: number },
+  ) {
+    const delivererId = client.data.delivererId;
+
+    const allowed =
+      await this.delivererJobService.validateLiveTracking(
+        data.jobId,
+        delivererId,
+      );
+
+    if (!allowed) return;
+
+    this.server.to(`job:${data.jobId}`).emit('location:update', {
+      lat: data.lat,
+      lng: data.lng,
+      timestamp: new Date(),
+    });
+  }
+
+  @SubscribeMessage('session.heartbeat')
+  async handleHeartbeat(@ConnectedSocket() client: Socket)
+  {
+    const userId = client.data.userId;
+    if (!userId) return;
+    await this.sessionService.heartbeat(userId);
+  }
 }

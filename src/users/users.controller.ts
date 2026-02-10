@@ -4,7 +4,6 @@ import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AuthGuard } from '@nestjs/passport';
 import { ResponseService } from 'src/common/services/response.service';
-import { IsOptional } from 'class-validator';
 import { OrderStatus } from '@prisma/client';
 
 @Controller('users')

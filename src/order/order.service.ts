@@ -3,11 +3,16 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create_order.dto';
 import { Order, OrderStatus, OrderType } from '@prisma/client';
 import { DelivererAssignmentService } from 'src/deliverer/deliverer-assignment.service';
+import { VendorGateway } from 'src/vendor/vendor.gateway';
+import { CustomerGateway } from 'src/users/customer.gateway';
+import { EventLogService } from 'src/common/events/event-log.service';
+import { EVENTS } from 'src/common/events/events.constants';
 
 @Injectable()
 export class OrderService 
 {
 
+  
     private readonly logger = new Logger(OrderService.name);
   
     private CITY_TYPE = process.env.CITY_TYPE || 'MEDIUM';
@@ -71,16 +76,22 @@ private estimateDelay(order, batchOrders, speedKmPerHour = 30)
 
   return delay;     
 }
-    constructor(private prisma: PrismaService,private readonly delivererAssignment: DelivererAssignmentService)
+    constructor(private readonly prisma: PrismaService,
+      private readonly delivererAssignment: DelivererAssignmentService,
+      private readonly vendorGateway:VendorGateway,
+      private readonly costumerGateway:CustomerGateway,
+      private readonly eventLogService: EventLogService
+    )
     {}
     async createOrder(dto: CreateOrderDto , vendorId: number , costumerId: number,)
-    
     {
       const vendor = await this.prisma.vendorProfile.findUnique({ where: { id: vendorId}, select:{ isActive:true,isVerified:true, latitude: true, longitude: true } });
       if (!vendor) throw new NotFoundException('Vendor profile not found');
-          if (!vendor.isActive || !vendor.isVerified) {
+          if (!vendor.isActive || !vendor.isVerified) 
+          {
             throw new ForbiddenException('Vendor profile is inactive or not verified');
           }
+
       const order = await this.prisma.order.create({
         data: 
         {
@@ -98,62 +109,33 @@ private estimateDelay(order, batchOrders, speedKmPerHour = 30)
           
       }
     });
+    
+    
+    
+  await this.eventLogService.recordEvent({
+      entityType: 'ORDER',
+        entityId: order.id,
+        eventType: EVENTS.ORDER.CREATED,
+        payload: {
+          orderId: order.id,
+          status: EVENTS.ORDER.CREATED,
+        },
+    });
+
+    this.vendorGateway.sendNewOrder(order.vendorId, order);
+
     return order;
     }
 
-    async vendorAcceptOrder(orderId: number, vendorId: number) {
-  const order = await this.prisma.order.findUnique({
-    where: { id: orderId },
-  });
-
-  if (!order) {
-    throw new Error('Order not found');
-  }
-
-  if (order.vendorId !== vendorId) {
-    throw new Error('Unauthorized vendor');
-  }
-
-  if (order.status !== OrderStatus.PENDING_VENDOR_CONFIRMATION) {
-    throw new Error('Order cannot be accepted in current status');
-  }
-
-  return this.prisma.order.update({
-    where: { id: orderId },
-    data: {
-      status: OrderStatus.VENDOR_ACCEPTED,
-    },
-  });
-}
-
-    async vendorRejectOrder(orderId: number, vendorId: number) {
-  const order = await this.prisma.order.findUnique({
-    where: { id: orderId },
-  });
-
-  if (!order) {
-    throw new Error('Order not found');
-  }
-
-  if (order.vendorId !== vendorId) {
-    throw new Error('Unauthorized vendor');
-  }
-
-  if (order.status !== OrderStatus.PENDING_VENDOR_CONFIRMATION) {
-    throw new Error('Order cannot be rejected in current status');
-  }
-
-  return this.prisma.order.update({
-    where: { id: orderId },
-    data: {
-      status: OrderStatus.VENDOR_REJECTED,
-    },
-  });
-}
+  
 
 
-    async vendorMarkReady(orderId: number) 
+    async vendorMarkReady(orderId: number,userId:number) 
   {
+    const vendor = await this.prisma.vendorProfile.findUnique({
+      where: {userId:userId}
+    });
+    
   const order = await this.prisma.order.findUnique({
     where: { id: orderId },
     include: {
@@ -164,6 +146,10 @@ private estimateDelay(order, batchOrders, speedKmPerHour = 30)
   });
 
   if (!order) throw new NotFoundException('Order not found');
+  if(!vendor || vendor.id != order.vendorId)
+    {
+      throw new NotFoundException('Unauthorized');
+    }
 
   const hasFood = order.orderItems.some(
     (item) => item.product.category.name.toLowerCase() === 'food'
@@ -181,7 +167,22 @@ private estimateDelay(order, batchOrders, speedKmPerHour = 30)
     include: { orderItems: true }
   });
 
+ 
+
   await this.handleReadyOrder(updatedOrder);
+  
+ await this.eventLogService.recordEvent({
+      entityType: 'ORDER',
+        entityId: order.id,
+        eventType: EVENTS.ORDER.READY,
+        payload: {
+          orderId: order.id,
+          status: EVENTS.ORDER.READY,
+        },
+    });
+
+      this.costumerGateway.sendOrderReady(order.customerId, order.id);
+
 
   return updatedOrder;
 }

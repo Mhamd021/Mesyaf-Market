@@ -12,7 +12,7 @@ import {  OrderStatus } from '@prisma/client';
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService, private response:ResponseService) { }
+  constructor(private readonly prisma: PrismaService, private readonly response:ResponseService) { }
  
   async create(data: CreateUserDto) {
     const user =  await this.prisma.user.create({

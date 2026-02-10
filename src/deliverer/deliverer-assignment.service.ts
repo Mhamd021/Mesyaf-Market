@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DelivererProfile, JobStatus, OrderStatus } from '@prisma/client';
 import { DelivererGateway } from './deliverer.gateway';
+import { CustomerGateway } from 'src/users/customer.gateway';
+import { EventLogService } from 'src/common/events/event-log.service';
+import { EVENTS } from 'src/common/events/events.constants';
 
 
 @Injectable()
@@ -9,7 +12,10 @@ export class DelivererAssignmentService {
 
   private readonly logger = new Logger(DelivererAssignmentService.name);
 
-  constructor(private readonly prisma: PrismaService,private readonly delivererGateway: DelivererGateway) { }
+  constructor(private readonly prisma: PrismaService,private readonly delivererGateway: DelivererGateway,
+    private readonly costumerGateway:CustomerGateway,private readonly eventLogService:EventLogService
+
+  ) { }
 
   private calcDistanceKm(
     lat1: number,
@@ -60,71 +66,52 @@ export class DelivererAssignmentService {
 
 
   async assignDelivererToBatch(batchId: number) {
-    this.logger.log(`Assigning deliverer to batch ${batchId}`);
-    const batch = await this.prisma.deliveryBatch.findUnique({
-      where: { id: batchId },
-      include: { orders: true },
-    });
-    if (!batch || batch.orders.length === 0) {
-      this.logger.warn(`Batch ${batchId} not found or empty`);
-      return;
-    }
-    const pickupLat = batch.orders[0].vendorLat;
-    const pickupLng = batch.orders[0].vendorLng;
+  this.logger.log(`Assigning deliverer to batch ${batchId}`);
 
-   if (pickupLat == null || pickupLng == null)
- {
-      this.logger.warn(`Batch ${batchId} has no pickup location`);
-      return;
-    }
-    if (batch.delivererId) {
-      this.logger.warn(`Batch ${batchId} already assigned`);
-      return;
-    }
-    const availableDeliverers = await this.prisma.delivererProfile.findMany({
-      where: {
-        availability: true,
-        activeJobId: null,
-      },
-    });
-    if (availableDeliverers.length === 0) {
-      this.logger.log('No available deliverers right now');
-      return;
-    }
+  const batch = await this.prisma.deliveryBatch.findUnique({
+    where: { id: batchId },
+    include: { orders: true },
+  });
 
-    const deliverer = this.findClosestDeliverer(
-      availableDeliverers,
-      pickupLat,
-      pickupLng,
-    );
+  if (!batch || batch.orders.length === 0) return;
 
-    if (!deliverer) {
-      this.logger.warn('No deliverer with valid location found');
-      return;
-    }
+  if (batch.delivererId) return;
 
-    const job = await this.prisma.deliveryJob.create({
+  const pickupLat = batch.orders[0].vendorLat;
+  const pickupLng = batch.orders[0].vendorLng;
+  if (pickupLat == null || pickupLng == null) return;
+
+  const availableDeliverers = await this.prisma.delivererProfile.findMany({
+    where: { availability: true, activeJobId: null },
+  });
+  if (!availableDeliverers.length) return;
+
+  const deliverer = this.findClosestDeliverer(
+    availableDeliverers,
+    pickupLat,
+    pickupLng,
+  );
+  if (!deliverer) return;
+
+  
+  const job = await this.prisma.$transaction(async (tx) => {
+    //  create job
+    const job = await tx.deliveryJob.create({
       data: {
         delivererId: deliverer.id,
-        status: JobStatus.PENDING,
+        status: JobStatus.ASSIGNED,
         totalOrders: batch.orders.length,
       },
     });
-    
-    this.delivererGateway.sendJobAssigned(deliverer.id, {
-      jobId: job.id,
-      batchId: batch.id,
-      totalOrders: batch.orders.length,
-    });
 
-    await this.prisma.deliveryBatch.update({
+    // update batch
+    await tx.deliveryBatch.update({
       where: { id: batchId },
-      data: {
-        delivererId: deliverer.id,
-      },
+      data: { delivererId: deliverer.id },
     });
 
-    await this.prisma.delivererProfile.update({
+    //  update deliverer
+    await tx.delivererProfile.update({
       where: { id: deliverer.id },
       data: {
         availability: false,
@@ -132,7 +119,8 @@ export class DelivererAssignmentService {
       },
     });
 
-    await this.prisma.order.updateMany({
+    //  update orders
+    await tx.order.updateMany({
       where: { deliveryBatchId: batchId },
       data: {
         delivererId: deliverer.id,
@@ -141,6 +129,7 @@ export class DelivererAssignmentService {
       },
     });
 
+    //  create dropoffs
     const dropOffsData = batch.orders.map((order, index) => ({
       jobId: job.id,
       orderId: order.id,
@@ -149,16 +138,42 @@ export class DelivererAssignmentService {
       dropoffLng: order.customerLng,
     }));
 
-    await this.prisma.deliveryDropOff.createMany({
+    await tx.deliveryDropOff.createMany({
       data: dropOffsData,
     });
 
+    return job;
+  });
 
+  
 
+  await this.eventLogService.recordEvent({
+    entityType: 'JOB',
+    entityId: job.id,
+    eventType: EVENTS.JOB.ASSIGNED,
+    payload: {
+      jobId: job.id,
+      status: EVENTS.JOB.ASSIGNED,
+    },
+  });
+  
+  this.delivererGateway.sendJobAssigned(deliverer.id, {
+    jobId: job.id,
+    batchId,
+    totalOrders: batch.orders.length,
+  });
 
-
+  for (const order of batch.orders) {
+    this.costumerGateway.sendDelivererAssigned(
+      order.customerId,
+      job.id,
+      deliverer.id,
+    );
   }
+}
+
 
 
 }
+
 

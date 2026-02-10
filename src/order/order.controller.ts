@@ -20,13 +20,18 @@ export class OrderController
         
     }
 
+
+
+
+
     @Patch('/markeReady/:orderId')
     @UseGuards(AuthGuard('jwt'), RolesGuard)
     @Roles(Role.VENDOR)
      async markOrderReady(
         @Param('orderId', ParseIntPipe) orderId: number,
+        @Req() req
     ) {
-        return this.orderService.vendorMarkReady(orderId);
+        return this.orderService.vendorMarkReady(orderId,req.user.id);
     }
 
    

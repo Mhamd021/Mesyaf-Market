@@ -85,9 +85,32 @@ export class VendorController {
   async getVendorOrders(
     @Req() req,
     @Param('status') status: OrderStatus
-  ) {
+  ) 
+  {
     return this.vendorService.getVendorOrders(req.user.id, status);
   }
+
+     @Post('orders/:orderId/accept')
+vendorAcceptOrder(
+  @Param('orderId', ParseIntPipe) orderId: number,
+  @Req() req,
+) {
+  return this.vendorService.vendorAcceptOrder(
+    orderId,
+    req.user.id, 
+  );
+}
+
+@Post('orders/:orderId/reject')
+vendorRejectOrder(
+  @Param('orderId', ParseIntPipe) orderId: number,
+  @Req() req,
+) {
+  return this.vendorService.vendorRejectOrder(
+    orderId,
+    req.user.id,
+  );
+}
 
 
 }

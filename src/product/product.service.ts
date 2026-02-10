@@ -9,7 +9,7 @@ import { ResponseService } from 'src/common/services/response.service';
 
 @Injectable()
 export class ProductService {
-  constructor(private prisma: PrismaService , private response: ResponseService) { }
+  constructor(private readonly prisma: PrismaService , private readonly response: ResponseService) { }
 
   //validate ownership and get product
   private async validateOwnershipAndGetProduct(userId: number, productId: number) {

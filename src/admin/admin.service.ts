@@ -6,7 +6,7 @@ import { UsersService } from 'src/users/users.service';
 
 @Injectable()
 export class AdminService {
-  constructor(private prisma: PrismaService, private response: ResponseService,private usersService: UsersService,) {}
+  constructor(private readonly prisma: PrismaService, private readonly response: ResponseService,private readonly usersService: UsersService,) {}
 
 
   async getAllUsers() {
