@@ -1,22 +1,29 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { JobStatus, OrderStatus } from "@prisma/client/wasm";
 import { EventLogService } from "src/common/events/event-log.service";
 import { PrismaService } from "src/prisma/prisma.service";
 import { Cron } from '@nestjs/schedule';
+import { AppLogger } from "src/common/logger/app-logger.service";
 
 
 @Injectable()
 export class DelivererRecoveryService {
-   
+
+
     @Cron('*/1 * * * *')
   async checkDeliverers() {
     await this.checkStaleDeliverers();
+    this.logger.log('Running deliverer recovery check');
+
   }
 
   constructor(
     private prisma: PrismaService,
     private eventLog: EventLogService,
-  ) {}
+    private logger: AppLogger,
+  ) {
+    this.logger.setContext(DelivererRecoveryService.name);
+  }
       DELIVERER_GRACE_MS = 2 * 60 * 1000;
 
   async checkStaleDeliverers() {
@@ -40,7 +47,11 @@ export class DelivererRecoveryService {
   }
 async handleDeliverer(deliverer: any) {
   const job = deliverer.activeJob;
-  if (!job) return;
+  if (!job)
+    {
+      this.logger.warn('Job not found for deliverer');
+      return;
+    }
 
   if (job.status === JobStatus.ASSIGNED) {
     await this.recoverUnstartedJob(deliverer, job);
@@ -61,7 +72,7 @@ async recoverUnstartedJob(deliverer: any, job: any) {
     });
 
     await tx.deliveryJob.update({
-      where: { id: job.id },
+      where: { id: job.id , status:JobStatus.ASSIGNED },
       data: {
         status: JobStatus.PENDING,
         delivererId: null,

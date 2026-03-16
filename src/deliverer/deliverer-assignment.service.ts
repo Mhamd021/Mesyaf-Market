@@ -1,21 +1,27 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DelivererProfile, JobStatus, OrderStatus } from '@prisma/client';
 import { DelivererGateway } from './deliverer.gateway';
 import { CustomerGateway } from 'src/users/customer.gateway';
 import { EventLogService } from 'src/common/events/event-log.service';
 import { EVENTS } from 'src/common/events/events.constants';
+import { AppLogger } from 'src/common/logger/app-logger.service';
 
 
 @Injectable()
 export class DelivererAssignmentService {
 
-  private readonly logger = new Logger(DelivererAssignmentService.name);
+  
+
 
   constructor(private readonly prisma: PrismaService,private readonly delivererGateway: DelivererGateway,
-    private readonly costumerGateway:CustomerGateway,private readonly eventLogService:EventLogService
+    private readonly costumerGateway:CustomerGateway,private readonly eventLogService:EventLogService,
+    private readonly logger: AppLogger,
 
-  ) { }
+  ) {
+            this.logger.setContext(DelivererAssignmentService.name);
+
+   }
 
   private calcDistanceKm(
     lat1: number,
@@ -66,49 +72,83 @@ export class DelivererAssignmentService {
 
 
   async assignDelivererToBatch(batchId: number) {
-  this.logger.log(`Assigning deliverer to batch ${batchId}`);
 
-  const batch = await this.prisma.deliveryBatch.findUnique({
+
+  try
+  {
+    const batch = await this.prisma.deliveryBatch.findUnique({
     where: { id: batchId },
     include: { orders: true },
   });
 
-  if (!batch || batch.orders.length === 0) return;
+  if (!batch || batch.orders.length === 0) {
+  this.logger.warn('BatchEmptyOrNotFound',
+    
+    { batchId } as any);
+  return;
+}
 
-  if (batch.delivererId) return;
+if (batch.delivererId) {
+  this.logger.debug('BatchAlreadyAssigned', { batchId } as any);
+  return;
+}
+
 
   const pickupLat = batch.orders[0].vendorLat;
   const pickupLng = batch.orders[0].vendorLng;
-  if (pickupLat == null || pickupLng == null) return;
+
+  if (pickupLat == null || pickupLng == null) {
+  this.logger.warn('BatchMissingVendorCoordinates', { batchId });
+  return;
+}
 
   const availableDeliverers = await this.prisma.delivererProfile.findMany({
     where: { availability: true, activeJobId: null },
   });
-  if (!availableDeliverers.length) return;
+  
+  if (!availableDeliverers.length) {
+  this.logger.warn('NoAvailableDeliverers', { batchId });
+  return;
+}
+
 
   const deliverer = this.findClosestDeliverer(
     availableDeliverers,
     pickupLat,
     pickupLng,
   );
-  if (!deliverer) return;
+  
+  if (!deliverer) {
+  this.logger.warn('NoClosestDelivererFound', { batchId });
+  return;
+}
+
 
   
   const job = await this.prisma.$transaction(async (tx) => {
     //  create job
-    const job = await tx.deliveryJob.create({
-      data: {
-        delivererId: deliverer.id,
+    const job = await tx.deliveryJob.upsert({
+      where: {
+        batchId,
+      },
+      create:
+      {
+         delivererId: deliverer.id,
+        batchId:batchId,
         status: JobStatus.ASSIGNED,
         totalOrders: batch.orders.length,
-      },
+      },update:{}
     });
 
     // update batch
-    await tx.deliveryBatch.update({
-      where: { id: batchId },
+   const updatedBatch = await tx.deliveryBatch.updateMany({
+      where: { id: batchId ,delivererId: null,status: JobStatus.IN_PROGRESS},
       data: { delivererId: deliverer.id },
     });
+    if(updatedBatch.count ===0) throw new ConflictException()
+      
+   
+    
 
     //  update deliverer
     await tx.delivererProfile.update({
@@ -170,7 +210,21 @@ export class DelivererAssignmentService {
       deliverer.id,
     );
   }
+ 
+  }
+  catch(e)
+  {
+    this.logger.error('AssignDelivererToBatchFailed', {
+      batchId,
+      error: e.message,
+      stack: e.stack,
+    } as any);
+
+    throw e;
+  }
 }
+
+
 
 
 

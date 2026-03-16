@@ -3,21 +3,29 @@ import { SubscribeMessage, WebSocketGateway, ConnectedSocket, MessageBody, WebSo
 import { Server, Socket } from 'socket.io';
 import { DeliveryJobSubscriptionService } from './delivery-job-subscription.service';
 import { ReconnectService } from 'src/common/websocket/reconnect.service';
-import { Logger } from '@nestjs/common/services/logger.service';
 import { SessionService } from 'src/common/websocket/session.service';
 import { ReplayService } from 'src/common/websocket/reply.service';
+import { AppLogger } from 'src/common/logger/app-logger.service';
+import { UseFilters } from '@nestjs/common';
+import { GlobalWsExceptionFilter } from 'src/common/filters/ws-exception.filter';
 
 @WebSocketGateway({ namespace: 'customer', cors: true })
+@UseFilters(GlobalWsExceptionFilter)
+
 export class CustomerGateway {
-  private readonly logger = new Logger(CustomerGateway.name);
   constructor(
     private readonly jwtService: JwtService,
     private readonly subscriptionService: DeliveryJobSubscriptionService,
     private readonly reconnectService: ReconnectService,
     private sessionService: SessionService,
-    private replayService: ReplayService
+    private replayService: ReplayService,
+    private readonly logger: AppLogger,
 
-  ) { }
+  ) { 
+    this.logger.setContext(CustomerGateway.name);
+  }
+
+
 
   @WebSocketServer()
   server: Server;

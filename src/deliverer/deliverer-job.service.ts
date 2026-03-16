@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ResponseService } from '../common/services/response.service';
 import { JobStatus, OrderStatus } from '@prisma/client';
@@ -8,13 +8,15 @@ import { EVENTS } from 'src/common/events/events.constants';
 @Injectable()
 export class DelivererJobService {
 
+  private readonly logger = new Logger(DelivererJobService.name);
 
     constructor(private readonly prisma: PrismaService,private readonly response: ResponseService,private readonly eventLogService:EventLogService) {}
 
 async startJob(jobId: number, delivererId: number) 
   {
-  const job = await this.prisma.deliveryJob.findUnique({
-    where: { id: jobId },
+  try {
+    const job = await this.prisma.deliveryJob.findUnique({
+    where: { id: jobId , status: JobStatus.ASSIGNED },
     include: {  orders: true },
   });
 
@@ -26,13 +28,14 @@ async startJob(jobId: number, delivererId: number)
   if (job.status !== JobStatus.ASSIGNED)
     throw new BadRequestException('Job not ready to start');
 
-  await this.prisma.deliveryJob.update({
-    where: { id: jobId },
+  const updatedJob = await this.prisma.deliveryJob.updateMany({
+    where: { id: jobId ,delivererId: delivererId,status: JobStatus.ASSIGNED},
     data: {
       status: JobStatus.IN_PROGRESS,
       startedAt: new Date(),
     },
   });
+  if(updatedJob.count === 0 ) {throw ConflictException}
 
   await this.prisma.order.updateMany({
     where: { deliveryJobId: jobId },
@@ -52,6 +55,17 @@ async startJob(jobId: number, delivererId: number)
   });
 
   return { success: true };
+    
+  } catch (e) {
+    this.logger.error('StartJobFailed', {
+      jobId,
+      delivererId,
+      error: e.message,
+      stack: e.stack,
+    } as any);
+
+    throw e;
+  }
 }
 
 async getDelivererJobs(userId: number, jobStatus?: JobStatus) 
@@ -86,8 +100,9 @@ async getDelivererJobs(userId: number, jobStatus?: JobStatus)
 }
 async completeJob(jobId: number, delivererId: number) 
 {
-  const job = await this.prisma.deliveryJob.findUnique({
-    where: { id: jobId },
+  try {
+    const job = await this.prisma.deliveryJob.findUnique({
+    where: { id: jobId , status: {not: JobStatus.COMPLETED}},
     include: { deliverer: true },
   });
 
@@ -100,7 +115,7 @@ async completeJob(jobId: number, delivererId: number)
     throw new BadRequestException('Job not in progress');
 
   await this.prisma.deliveryJob.update({
-    where: { id: jobId },
+    where: { id: jobId,status:{not: JobStatus.COMPLETED} },
     data: {
       status: JobStatus.COMPLETED,
       completedAt: new Date(),
@@ -136,10 +151,21 @@ async completeJob(jobId: number, delivererId: number)
 });
 
   return { success: true };
+  } catch (e) {
+    this.logger.error('CompleteJobFailed', {
+      jobId,
+      delivererId,
+      error: e.message,
+      stack: e.stack,
+
+    });
+    throw e;
+  }
 }
 
 async completeDropOff(jobId: number, dropOffId: number, delivererId: number) {
-  const job = await this.prisma.deliveryJob.findUnique({
+  try{
+    const job = await this.prisma.deliveryJob.findUnique({
     where: { id: jobId },
   });
 
@@ -150,7 +176,7 @@ async completeDropOff(jobId: number, dropOffId: number, delivererId: number) {
     throw new BadRequestException('Job not in progress');
 
 const dropOff =  await this.prisma.deliveryDropOff.update({
-    where: { id: dropOffId },
+    where: { id: dropOffId , status: { not: JobStatus.COMPLETED }},
     data: {
       status: JobStatus.COMPLETED,
       completedAt: new Date(),
@@ -158,7 +184,7 @@ const dropOff =  await this.prisma.deliveryDropOff.update({
   });
 
   await this.prisma.order.update({
-  where: { id: dropOff.orderId },
+  where: { id: dropOff.orderId ,status:{not: OrderStatus.COMPLETED}},
   data: {
     status: OrderStatus.COMPLETED,
     deliveredAt: new Date(),
@@ -182,13 +208,25 @@ await this.eventLogService.recordEvent({
       status: { not: JobStatus.COMPLETED },
     },
   });
-
+  
   if (remainingStops.length === 0) {
     await this.completeJob(jobId, delivererId);
     return { success: true, jobCompleted: true };
   }
 
   return { success: true, jobCompleted: false };
+  }
+  catch(e)
+  {
+    this.logger.error('CompleteDropOffFailed',
+      {
+       dropOffId: dropOffId,
+       error: e.message,
+       stack: e.stack
+
+      });
+      throw e;
+  }
 }
 
 
@@ -220,7 +258,7 @@ async validateLiveTracking( jobId: number, delivererId: number,): Promise<boolea
 
   if (job.delivererId !== delivererId) return false;
 
-  if (job.status !== 'IN_PROGRESS') return false;
+  if (job.status !== JobStatus.IN_PROGRESS) return false;
 
   return true;
 }

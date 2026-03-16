@@ -9,7 +9,6 @@ import { CustomerGateway } from 'src/users/customer.gateway';
 import { EVENTS } from 'src/common/events/events.constants';
 import { EventLogService } from 'src/common/events/event-log.service';
 
-// if (!vendor || vendor.id != order.vendorId) this logic is repeated
 
 @Injectable()
 export class VendorService 

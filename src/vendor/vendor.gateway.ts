@@ -3,11 +3,13 @@ import { ConnectedSocket, OnGatewayConnection, SubscribeMessage, WebSocketGatewa
 import { Server, Socket } from 'socket.io';
 import { VendorService } from './vendor.service';
 import { ReconnectService } from 'src/common/websocket/reconnect.service';
-import { Logger } from '@nestjs/common';
+import { Logger, UseFilters } from '@nestjs/common';
 import { SessionService } from 'src/common/websocket/session.service';
 import { ReplayService } from 'src/common/websocket/reply.service';
+import { GlobalWsExceptionFilter } from 'src/common/filters/ws-exception.filter';
 
 @WebSocketGateway({ namespace: 'vendor', cors: true })
+@UseFilters(GlobalWsExceptionFilter)
 export class VendorGateway implements OnGatewayConnection {
   @WebSocketServer()
   server: Server;

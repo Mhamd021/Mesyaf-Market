@@ -1,14 +1,23 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { EventLog, Prisma } from "@prisma/client";
 import { EVENTS } from "src/common/events/events.constants";
 import { PrismaService } from "src/prisma/prisma.service";
+import { AppLogger } from "../logger/app-logger.service";
 
 @Injectable()
 export class OrderTimelineProjectionService {
-  constructor(private prisma: PrismaService) {}
+  
+
+  constructor(private prisma: PrismaService,private readonly logger:AppLogger) {
+    this.logger.setContext(OrderTimelineProjectionService.name);
+  }
 
   async project(event: EventLog) {
-    if (event.entityType !== 'ORDER') return;
+    if (event.entityType !== 'ORDER') 
+      {
+        this.logger.warn('the event type is not an order');
+        return;
+      }
 
     const existing = await this.prisma.orderTimeline.findFirst({ 
       where:
@@ -18,7 +27,11 @@ export class OrderTimelineProjectionService {
         occurredAt: event.createdAt,
       }
     });
-    if (existing) return; 
+    if (existing)
+      {
+        this.logger.warn('event already projected');
+        return;
+      } 
 
     await this.prisma.orderTimeline.create({
       data: {

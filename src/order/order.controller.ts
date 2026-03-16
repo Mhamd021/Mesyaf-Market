@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Param, ParseIntPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create_order.dto';
 import { Roles } from 'src/common/decorators/roles.decorator';
@@ -11,6 +11,12 @@ import { Role } from 'src/common/enums/role.enum';
 export class OrderController 
 {
     constructor(private readonly orderService: OrderService){}
+
+    @Get('test-error')
+testError() {
+  throw new Error('Something broke');
+}
+
 
     @Post('/:vendorId')
     @UseGuards(AuthGuard('jwt'))

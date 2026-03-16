@@ -12,13 +12,20 @@ import { DelivererModule } from './deliverer/deliverer.module';
 import { TimeLineModule } from './common/timeline/timeline.module';
 import { RecoveryModule } from './common/decorators/recovery/recovery.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { HealthController } from './health/health.controller';
+import { EventsModule } from './common/events/events.module';
+import { WebsocketModule } from './common/websocket/websocket.module';
+import { LoggerModule } from './common/logger/app-logger.module';
 
 
 @Module({
   imports: [
-    ScheduleModule.forRoot(),
-    UsersModule, AuthModule, VendorModule, ProductModule, CommonModule, AdminModule, OrderModule, DelivererModule,TimeLineModule,RecoveryModule],
-  controllers: [AppController],
+    WebsocketModule,
+    LoggerModule,
+    UsersModule, AuthModule, VendorModule, ProductModule, CommonModule, AdminModule, OrderModule, DelivererModule,TimeLineModule,RecoveryModule,EventsModule,
+     ScheduleModule.forRoot(),
+  ],
+  controllers: [AppController,HealthController],
   providers: [AppService],
   
 })

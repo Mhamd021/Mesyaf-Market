@@ -214,6 +214,8 @@ model OrderItem {
 
   order   Order   @relation(fields: [orderId], references: [id])
   product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
 }
 
 model DeliveryDropOff {
@@ -233,11 +235,12 @@ model DeliveryDropOff {
 model DeliveryJob {
   id              Int       @id @default(autoincrement())
   delivererId     Int?
+  batchId         Int @unique
   status          JobStatus @default(PENDING)
   assignedAt      DateTime  @default(now())
   startedAt       DateTime?
   completedAt     DateTime?
-  routeJson       Json? // coordinates or steps
+  routeJson       Json? 
   totalDistanceKm Float?
   totalOrders     Int?
 

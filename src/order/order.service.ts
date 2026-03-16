@@ -7,13 +7,14 @@ import { VendorGateway } from 'src/vendor/vendor.gateway';
 import { CustomerGateway } from 'src/users/customer.gateway';
 import { EventLogService } from 'src/common/events/event-log.service';
 import { EVENTS } from 'src/common/events/events.constants';
+import { AppLogger } from 'src/common/logger/app-logger.service';
 
 @Injectable()
 export class OrderService 
 {
 
   
-    private readonly logger = new Logger(OrderService.name);
+    
   
     private CITY_TYPE = process.env.CITY_TYPE || 'MEDIUM';
     private CITY_RULES = 
@@ -72,7 +73,6 @@ private estimateDelay(order, batchOrders, speedKmPerHour = 30)
 
   const delay = routeTime - soloTime;
 
-  console.log(`Solo time: ${soloTime.toFixed(2)} min, Route time: ${routeTime.toFixed(2)} min, Delay: ${delay.toFixed(2)} min`);
 
   return delay;     
 }
@@ -80,12 +80,17 @@ private estimateDelay(order, batchOrders, speedKmPerHour = 30)
       private readonly delivererAssignment: DelivererAssignmentService,
       private readonly vendorGateway:VendorGateway,
       private readonly costumerGateway:CustomerGateway,
-      private readonly eventLogService: EventLogService
+      private readonly eventLogService: EventLogService,
+      private readonly logger: AppLogger,
     )
-    {}
+    {
+          this.logger.setContext(OrderService.name);
+
+    }
     async createOrder(dto: CreateOrderDto , vendorId: number , costumerId: number,)
     {
-      const vendor = await this.prisma.vendorProfile.findUnique({ where: { id: vendorId}, select:{ isActive:true,isVerified:true, latitude: true, longitude: true } });
+      try {
+        const vendor = await this.prisma.vendorProfile.findUnique({ where: { id: vendorId}, select:{ isActive:true,isVerified:true, latitude: true, longitude: true } });
       if (!vendor) throw new NotFoundException('Vendor profile not found');
           if (!vendor.isActive || !vendor.isVerified) 
           {
@@ -125,6 +130,14 @@ private estimateDelay(order, batchOrders, speedKmPerHour = 30)
     this.vendorGateway.sendNewOrder(order.vendorId, order);
 
     return order;
+      } catch (e) {
+        this.logger.error('createOrderFailed',{
+          error: e.message,
+          stack: e.stack
+        } as any);
+        throw e;
+      }
+      
     }
 
   
@@ -132,7 +145,9 @@ private estimateDelay(order, batchOrders, speedKmPerHour = 30)
 
     async vendorMarkReady(orderId: number,userId:number) 
   {
-    const vendor = await this.prisma.vendorProfile.findUnique({
+    try
+    {
+      const vendor = await this.prisma.vendorProfile.findUnique({
       where: {userId:userId}
     });
     
@@ -183,8 +198,19 @@ private estimateDelay(order, batchOrders, speedKmPerHour = 30)
 
       this.costumerGateway.sendOrderReady(order.customerId, order.id);
 
+      
+
 
   return updatedOrder;
+    }
+    catch(e)
+    {
+      this.logger.error('VendorMarkOrderReadyFailed',{
+        error:e.message,
+        stack:e.stack
+      });
+      throw e;
+    }
 }
 
 private async handleReadyOrder(order: Order) 
@@ -233,12 +259,11 @@ private async checkBatchEligibility(order, batch, rules)
   };
 
   const dist = this.calcDistanceKm(vendorA, vendorB) * 1000;
-  console.log(`Distance between vendors: ${dist} meters`);
+  
   if (dist > rules.MAX_VENDOR_DIST) return false;
 
   const etaDelay = this.estimateDelay(order, batchOrders);
 
-  console.log(`Estimated delay for batching: ${etaDelay} minutes`);
   if (etaDelay > rules.MAX_DELAY_THRESHOLD) return false;
 
   
@@ -252,7 +277,7 @@ private shouldCloseBatch(batch, rules) {
   const ageMin = (now - createdAt) / 60000;
 
   if (ageMin >= rules.WINDOW_MIN) {
-    console.log('Closing batch: window expired');
+    
     return true;
   }
 
@@ -265,7 +290,7 @@ private shouldCloseBatch(batch, rules) {
   const max = hasFood ? this.FOOD_MAX_BATCH : this.GROCERY_MAX_BATCH;
 
   if (orders.length >= max) {
-    console.log('Closing batch: max size reached');
+    this.logger.debug('Closing batch: max size reached');
     return true;
   }
 
@@ -276,12 +301,22 @@ private async closeBatch(batchId: number) {
   
   this.logger.log(`Closing batch ${batchId} and assigning deliverer`);
 
-  await this.prisma.deliveryBatch.update({
-    where: { id: batchId },
+  const result =  await this.prisma.deliveryBatch.update({
+    where: { id: batchId ,status:'PENDING'},
     data: {
       status: 'IN_PROGRESS',
     },
   });
+
+  if (!result) {
+  this.logger.debug('BatchAlreadyClosed', { batchId });
+  return;
+}
+
+  this.logger.log('BatchIsClosed',
+    {
+      batchId:batchId,
+    });
 
   await this.delivererAssignment.assignDelivererToBatch(batchId);
 

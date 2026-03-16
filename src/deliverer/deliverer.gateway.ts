@@ -1,14 +1,16 @@
 import { WebSocketGateway, WebSocketServer, OnGatewayConnection, OnGatewayDisconnect, SubscribeMessage, MessageBody, ConnectedSocket, } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, UseFilters } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { DelivererJobService } from './deliverer-job.service';
 import { ReconnectService } from 'src/common/websocket/reconnect.service';
 import { SessionService } from 'src/common/websocket/session.service';
 import { ReplayService } from 'src/common/websocket/reply.service';
+import { GlobalWsExceptionFilter } from 'src/common/filters/ws-exception.filter';
 
 
 @WebSocketGateway({ namespace: 'deliverer', cors: true })
+@UseFilters(GlobalWsExceptionFilter)
 export class DelivererGateway implements OnGatewayConnection, OnGatewayDisconnect
 {
   @WebSocketServer()
