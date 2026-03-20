@@ -1,5 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
-import { JobStatus, OrderStatus } from "@prisma/client/wasm";
+import { JobStatus, OrderStatus } from "@prisma/client"
 import { EventLogService } from "src/common/events/event-log.service";
 import { PrismaService } from "src/prisma/prisma.service";
 import { Cron } from '@nestjs/schedule';
