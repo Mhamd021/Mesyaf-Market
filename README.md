@@ -21,9 +21,9 @@
   <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
   [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
 
-# E-Commerce Delivery Backend
+# Ecommerce Delivery Backend
 
-A production-ready backend system for multi-vendor e-commerce with real-time delivery tracking. Built with NestJS, PostgreSQL, and WebSockets — designed around event-driven architecture and a clear domain model.
+A production-ready backend for multi-vendor e-commerce with real-time delivery orchestration. Built with NestJS, PostgreSQL, Prisma, and Socket.IO — designed around event-driven architecture, role-separated WebSocket gateways, and an intelligent batch engine.
 
 > **Status:** In active development · Deployment in progress
 
@@ -40,44 +40,45 @@ The system handles the full order lifecycle — from creation and vendor eligibi
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  Clients: Customer · Vendor · Deliverer · Admin          │
-└──────────────┬──────────────────┬───────────────────────┘
-               │  REST            │  WebSocket
-               ▼                  ▼
-┌─────────────────────────────────────────────────────────┐
-│  NestJS API Gateway                                      │
-│  JWT Auth Guards · Role-based Access Control             │
-└──────┬────────────┬─────────────┬────────────┬──────────┘
-       │            │             │            │
-       ▼            ▼             ▼            ▼
-  OrderService  DelivererJob  WS Gateways  AuthService
-  BatchEngine   Service       (3 roles)    JWT + Roles
-       │            │             │
-       └────────────┴─────────────┘
-                    │
-                    ▼
-        ┌───────────────────────┐
-        │  PostgreSQL + Prisma  │
-        │  Event Log (append-   │
-        │  only audit trail)    │
-        └───────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│   Clients: Customer · Vendor · Deliverer · Admin          │
+└───────────────┬──────────────────┬───────────────────────┘
+                │  REST            │  WebSocket
+                ▼                  ▼
+┌──────────────────────────────────────────────────────────┐
+│   NestJS API Gateway                                      │
+│   JWT Auth Guards · Role-based Access Control (4 roles)   │
+└──────┬──────────────┬──────────────┬──────────┬──────────┘
+       │              │              │          │
+       ▼              ▼              ▼          ▼
+  OrderService  DelivererJob   WS Gateways  AuthService
+  BatchEngine   Service        vendor /     JWT + Roles
+                               deliverer /
+                               customer
+       │              │              │
+       └──────────────┴──────────────┘
+                       │
+                       ▼
+          ┌─────────────────────────┐
+          │  PostgreSQL + Prisma    │
+          │  Event Log (immutable   │
+          │  append-only audit)     │
+          └─────────────────────────┘
 ```
 
 ---
 
 ## Key Technical Decisions
 
-### 1. Event Log as Audit Trail
+### 1. Event Log as Immutable Audit Trail
 
-Every state change in the system — order created, vendor marked ready, job started, drop-off completed — is recorded as an immutable event. This gives us:
+Every state change — order created, vendor marked ready, job started, drop-off completed — is recorded as an immutable event. This gives the system:
 
 - Full timeline reconstruction for any order or delivery job
 - Debugging without needing to reproduce state
-- Foundation for future analytics or replay
+- Foundation for future analytics and replay on reconnect
 
 ```typescript
-// Every significant action appends an event
 await this.eventLogService.record({
   type: EventType.ORDER_CREATED,
   actorId: vendor.id,
@@ -86,12 +87,12 @@ await this.eventLogService.record({
 });
 ```
 
-### 2. Batch Engine
+### 2. Batch Engine for Delivery Efficiency
 
-Orders aren't assigned to deliverers one by one. The system groups nearby orders into batches before assignment, reducing delivery trips and increasing efficiency.
+Orders are not assigned to deliverers one by one. The system groups nearby orders into batches before triggering assignment — reducing trips and increasing throughput.
 
 A batch closes when any of these conditions are met:
-- Time window exceeded (configurable)
+- Time window exceeded (configurable per `CITY_TYPE`)
 - Maximum batch size reached
 - Delay threshold triggered
 
@@ -99,41 +100,36 @@ A batch closes when any of these conditions are met:
 New order arrives
       │
       ▼
-Is there an open batch for this area/vendor?
-      │
-   ┌──┴──┐
-  Yes    No
-   │      └──► Create new batch
-   │
-   ▼
-Add to existing batch
-      │
-      ▼
-Close conditions met? ──► Trigger deliverer assignment
+Open batch exists for this area?
+      ├── Yes → Add to batch → Close conditions met? → Assign deliverer
+      └── No  → Create new batch
 ```
 
 ### 3. Role-Separated WebSocket Gateways
 
-Instead of one monolithic gateway, each role has its own gateway with its own authentication and room logic:
+Instead of one monolithic gateway, each role has its own namespace with dedicated authentication and room logic. A customer token cannot connect to the vendor namespace — the gateway rejects it on handshake.
 
-| Gateway | Namespace | Rooms |
+| Gateway | Namespace | Key Events |
 |---|---|---|
-| `VendorGateway` | `/vendor` | `vendor:{id}` |
-| `CustomerGateway` | `/customer` | `order:{id}` |
-| `DelivererGateway` | `/deliverer` | `deliverer:{id}` |
+| `VendorGateway` | `/vendor` | `order:new`, `order:ready` |
+| `CustomerGateway` | `/customer` | `order:update`, `delivery:completed` |
+| `DelivererGateway` | `/deliverer` | `job:start`, `dropoff:complete`, `location:update` |
 
-Each gateway validates the JWT and role on connection — a customer token cannot connect to the vendor namespace.
+Reconnect replay is supported — clients receive missed events on reconnection via the session/replay service.
 
-### 4. Deliverer Job as State Machine
+### 4. Delivery Job as a State Machine
 
-A delivery job moves through explicit states. Invalid transitions are rejected at the service level, not just the controller.
+A delivery job moves through explicit states. Invalid transitions are rejected at the service level.
 
 ```
-PENDING ──► ASSIGNED ──► IN_PROGRESS ──► COMPLETED
-                              │
-                         (per stop)
-                         completeDropOff()
+PENDING → ASSIGNED → IN_PROGRESS → COMPLETED
+                          │
+                    (per stop: completeDropOff)
 ```
+
+### 5. Timeline Projections
+
+Beyond the raw event log, the system builds structured `OrderTimeline` and `JobTimeline` projections — queryable snapshots of each entity's history, useful for client-facing status views without replaying all events.
 
 ---
 
@@ -141,31 +137,70 @@ PENDING ──► ASSIGNED ──► IN_PROGRESS ──► COMPLETED
 
 | Layer | Technology | Why |
 |---|---|---|
-| Framework | NestJS (TypeScript) | Dependency injection, modular architecture, built-in WebSocket support |
-| Database | PostgreSQL 16 | Relational integrity for order/job relationships, JSONB for event metadata |
-| ORM | Prisma | Type-safe queries, migration management, schema-as-source-of-truth |
-| Real-time | Socket.IO via NestJS | Role-based namespaces, reconnection handling, event replay |
-| Auth | JWT + Passport | Stateless, role claims in payload, guard-based protection |
-| Containerization | Docker + Docker Compose | Reproducible environments, Nginx reverse proxy, PostgreSQL with persistent volume |
+| Framework | NestJS (TypeScript) | Modular architecture, DI, built-in WebSocket + guards |
+| Database | PostgreSQL 16 | Relational integrity, JSONB for event metadata |
+| ORM | Prisma | Type-safe queries, schema-as-source-of-truth, migrations |
+| Real-time | Socket.IO (via NestJS) | Namespaces per role, reconnect/replay support |
+| Auth | JWT + Passport | Stateless, role claims in token payload |
+| Infra | Docker Compose + Nginx | Reproducible deploys, reverse proxy, DB persistence |
 
 ---
 
-## Domain Model
+## Features
+
+- JWT-based authentication and role-aware access control
+- User management for `ADMIN`, `VENDOR`, `DELIVERER`, and `CUSTOMER`
+- Vendor profiles and product catalog management
+- Order creation with vendor eligibility validation
+- Delivery batching engine with configurable thresholds
+- Deliverer job assignment and state transitions
+- Real-time communication over Socket.IO (3 namespaces)
+- Reconnect replay and session context on gateway reconnect
+- Event log persistence and timeline projections
+- Global validation, exception handling, and guards
+
+---
+
+## Project Structure
 
 ```
-User (role: CUSTOMER | VENDOR | DELIVERER | ADMIN)
-  │
-  ├── Order
-  │     ├── OrderItem → Product → Category (FOOD | GROCERY)
+server/
+  src/
+    auth/               # JWT strategy, guards, role decorator
+    users/              # User profile operations
+    vendor/             # Vendor profile + vendor WebSocket gateway
+    product/            # Product and catalog logic
+    order/              # Order lifecycle, batch engine, ready flow
+    deliverer/          # Job lifecycle + deliverer WebSocket gateway
+    admin/              # Admin operations
+    common/
+      events/           # Event log recording
+      timeline/         # Order and job timeline projections
+      websocket/        # Reconnect, session, replay support
+    prisma/             # PrismaService
+  prisma/
+    schema.prisma
+    seed.ts
+```
+
+---
+
+## Data Model
+
+```
+User (CUSTOMER | VENDOR | DELIVERER | ADMIN)
+  ├── VendorProfile → Product
+  ├── Order → OrderItem → Product
   │     ├── EventLog (append-only)
-  │     └── Batch → DeliveryJob
-  │
+  │     ├── OrderTimeline (projection)
+  │     └── DeliveryBatch → DeliveryJob
   └── DeliveryJob
-        ├── JobStop (one per order in batch)
-        └── EventLog
+        ├── DeliveryDropOff (one per order in batch)
+        ├── EventLog
+        └── JobTimeline (projection)
 ```
 
-The `Category` type on products drives the batch detection logic — FOOD and GROCERY orders follow different batching rules.
+See `server/prisma/schema.prisma` for the full schema.
 
 ---
 
@@ -192,13 +227,15 @@ The `Category` type on products drives the batch detection logic — FOOD and GR
 | GET | `/jobs/:id/tracking` | Customer (own order only) |
 
 ### WebSocket Events (Deliverer Gateway)
-| Event | Direction | Payload |
+
+| Event | Direction | Description |
 |---|---|---|
-| `job:start` | Client → Server | `{ jobId }` |
-| `job:started` | Server → Client | `{ job, stops }` |
-| `dropoff:complete` | Client → Server | `{ jobId, stopId }` |
-| `delivery:completed` | Server → Client | `{ jobId, completedAt }` |
-| `location:update` | Client → Server | `{ lat, lng }` |
+| `job:start` | Client → Server | Start an assigned job |
+| `job:started` | Server → Client | Job confirmed, stops returned |
+| `dropoff:complete` | Client → Server | Mark a stop as delivered |
+| `delivery:completed` | Server → Client | Entire job finished |
+| `location:update` | Client → Server | Live GPS coordinates |
+| `session.context` | Server → Client | Replay on reconnect |
 
 ---
 
@@ -207,58 +244,88 @@ The `Category` type on products drives the batch detection logic — FOOD and GR
 **Requirements:** Docker and Docker Compose
 
 ```bash
-# Clone the repository
-git clone https://github.com/Mhamd021/your-backend-repo.git
-cd your-backend-repo
+# Clone
+git clone https://github.com/Mhamd021/your-repo.git
+cd your-repo
 
-# Copy environment variables
-cp .env.example .env
+# Configure environment
+cp server/.env.example server/.env
+# Edit server/.env with your values
 
-# Start everything (app + postgres + nginx)
-docker compose up -d --build
+# Start everything
+docker-compose up --build
 
-# Run database migrations
+# Run migrations
 docker compose exec app npx prisma migrate deploy
 
-# The API is now available at http://localhost:3000
+# Optional: seed data
+docker compose exec app npx prisma db seed
 ```
 
-**Environment variables (`.env.example`):**
+**Without Docker:**
+
+```bash
+cd server
+npm install
+npx prisma generate
+npx prisma migrate dev
+npm run start:dev
+```
+
+**Minimum `.env` required:**
 
 ```env
-DATABASE_URL="postgresql://user:password@db:5432/delivery_db"
-JWT_SECRET="your-secret-here"
-NODE_ENV=development
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/mydb
+JWT_SECRET=your_secret_here
 PORT=3000
+CITY_TYPE=MEDIUM
 ```
 
 ---
 
-## Project Structure
+## Scripts
 
+```bash
+npm run start:dev     # development with hot reload
+npm run build         # production build
+npm run start:prod    # run production build
+npm run test          # unit tests
+npm run test:cov      # coverage report
+npm run test:e2e      # end-to-end tests
 ```
-src/
-├── auth/               # JWT strategy, guards, role decorator
-├── orders/             # OrderService, OrderController, BatchEngine
-├── delivery-jobs/      # DelivererJobService, job state transitions
-├── gateways/
-│   ├── vendor.gateway.ts
-│   ├── customer.gateway.ts
-│   └── deliverer.gateway.ts
-├── event-log/          # Append-only event recording
-├── users/              # User management, role assignment
-├── prisma/             # PrismaService, schema
-└── common/             # Guards, decorators, interceptors
-```
+
+---
+
+## Testing
+
+The project uses Jest and Supertest. Current coverage includes starter unit and E2E specs.
+
+Highest-value areas for future coverage (in priority order):
+
+1. `OrderService` — vendor eligibility, batching rules, deliverer assignment
+2. `DelivererJobService` — state transitions, drop-off completion, job closing
+3. WebSocket gateways — auth on connect, room joining, event emission
+4. Auth flows — registration, login, token validation
 
 ---
 
 ## What I Would Improve Next
 
-- **Testing:** Unit tests for `OrderService` and `DelivererJobService` (business rules and state transitions). E2E tests for the 5 critical flows.
-- **Queue-based assignment:** Move deliverer assignment from synchronous to a job queue (Bull/BullMQ) to handle high load gracefully.
-- **Rate limiting:** Per-role rate limiting on the WebSocket gateways.
-- **Observability:** Structured logging with correlation IDs across the order lifecycle.
+- **Test coverage:** Unit tests for `OrderService` and `DelivererJobService` state machines. E2E tests for the 5 critical flows (register → order → ready → job start → drop-off complete).
+- **Job queue:** Move deliverer assignment from synchronous to Bull/BullMQ to handle load gracefully.
+- **Rate limiting:** Per-role limits on WebSocket gateways to prevent event flooding.
+- **Observability:** Structured logging with correlation IDs across the full order lifecycle.
+- **API documentation:** OpenAPI/Swagger spec generated from NestJS decorators.
+- **CI pipeline:** GitHub Actions for linting, tests, and Prisma schema checks on every push.
+
+---
+
+## Contributing
+
+1. Create a feature branch
+2. Make focused, well-scoped changes
+3. Add or update tests where relevant
+4. Open a pull request with a clear summary of what changed and why
 
 ---
 
