@@ -2,10 +2,11 @@ import { ConflictException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { DelivererProfile, JobStatus, OrderStatus } from '@prisma/client';
 import { DelivererGateway } from './deliverer.gateway';
-import { CustomerGateway } from 'src/users/customer.gateway';
-import { EventLogService } from 'src/common/events/event-log.service';
-import { EVENTS } from 'src/common/events/events.constants';
-import { AppLogger } from 'src/common/logger/app-logger.service';
+import { CustomerGateway } from '../users/customer.gateway';
+import { AppLogger } from '../common/logger/app-logger.service';
+import { EventLogService } from '../common/events/event-log.service';
+import { EVENTS } from '../common/events/events.constants';
+
 
 
 @Injectable()
@@ -72,8 +73,6 @@ export class DelivererAssignmentService {
 
 
   async assignDelivererToBatch(batchId: number) {
-
-
   try
   {
     const batch = await this.prisma.deliveryBatch.findUnique({
@@ -133,11 +132,19 @@ if (batch.delivererId) {
       },
       create:
       {
-         delivererId: deliverer.id,
+        delivererId: deliverer.id,
         batchId:batchId,
         status: JobStatus.ASSIGNED,
         totalOrders: batch.orders.length,
-      },update:{}
+      },
+      update: {
+        delivererId: deliverer.id,
+        status: JobStatus.ASSIGNED,
+        totalOrders: batch.orders.length,
+        assignedAt: new Date(),
+        startedAt: null,
+        completedAt: null,
+      }
     });
 
     // update batch
@@ -170,6 +177,10 @@ if (batch.delivererId) {
     });
 
     //  create dropoffs
+    await tx.deliveryDropOff.deleteMany({
+      where: { jobId: job.id },
+    });
+
     const dropOffsData = batch.orders.map((order, index) => ({
       jobId: job.id,
       orderId: order.id,
@@ -212,15 +223,18 @@ if (batch.delivererId) {
   }
  
   }
-  catch(e)
-  {
+  catch (error: unknown) {
+    const message =
+      error instanceof Error ? error.message : String(error);
+    const stack = error instanceof Error ? error.stack : undefined;
+
     this.logger.error('AssignDelivererToBatchFailed', {
       batchId,
-      error: e.message,
-      stack: e.stack,
+      error: message,
+      stack,
     } as any);
 
-    throw e;
+    throw error;
   }
 }
 

@@ -3,8 +3,8 @@ import { Controller, Get, Post, Patch, Delete, Param, Body, UseGuards, Req, Quer
 import { UsersService } from './users.service';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AuthGuard } from '@nestjs/passport';
-import { ResponseService } from 'src/common/services/response.service';
 import { OrderStatus } from '@prisma/client';
+import { ResponseService } from '../common/services/response.service';
 
 @Controller('users')
 export class UsersController {

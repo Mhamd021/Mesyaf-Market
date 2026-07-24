@@ -2,8 +2,9 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { PrismaService } from '../prisma/prisma.service';
 import { ResponseService } from '../common/services/response.service';
 import { JobStatus, OrderStatus } from '@prisma/client';
-import { EventLogService } from 'src/common/events/event-log.service';
-import { EVENTS } from 'src/common/events/events.constants';
+import { EventLogService } from '../common/events/event-log.service';
+import { EVENTS } from '../common/events/events.constants';
+
 
 @Injectable()
 export class DelivererJobService {

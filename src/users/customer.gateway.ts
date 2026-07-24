@@ -2,12 +2,14 @@ import { JwtService } from '@nestjs/jwt';
 import { SubscribeMessage, WebSocketGateway, ConnectedSocket, MessageBody, WebSocketServer, } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { DeliveryJobSubscriptionService } from './delivery-job-subscription.service';
-import { ReconnectService } from 'src/common/websocket/reconnect.service';
-import { SessionService } from 'src/common/websocket/session.service';
-import { ReplayService } from 'src/common/websocket/reply.service';
-import { AppLogger } from 'src/common/logger/app-logger.service';
+
 import { UseFilters } from '@nestjs/common';
-import { GlobalWsExceptionFilter } from 'src/common/filters/ws-exception.filter';
+import { GlobalWsExceptionFilter } from '../common/filters/ws-exception.filter';
+import { AppLogger } from '../common/logger/app-logger.service';
+import { ReconnectService } from '../common/websocket/reconnect.service';
+import { ReplayService } from '../common/websocket/reply.service';
+import { SessionService } from '../common/websocket/session.service';
+
 
 @WebSocketGateway({ namespace: 'customer', cors: true })
 @UseFilters(GlobalWsExceptionFilter)
@@ -28,7 +30,7 @@ export class CustomerGateway {
 
 
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   async handleConnection(client: Socket) {
     try {
@@ -42,9 +44,10 @@ export class CustomerGateway {
       if (payload.role !== 'CUSTOMER') {
         return client.disconnect();
       }
-     await this.sessionService.markOnline(payload.sub);
+      await this.sessionService.markOnline(payload.sub);
 
       const customerId = payload.sub;
+      client.data.userId = customerId;
       client.data.customerId = customerId;
 
       client.join(`customer:${customerId}`);
@@ -143,11 +146,19 @@ export class CustomerGateway {
     });
   }
 
+  sendDeliveryIssue(customerId: number, jobId: number, orderId: number) {
+    this.server.to(`customer:${customerId}`).emit('delivery:issue', {
+      jobId,
+      orderId,
+      status: 'DELIVERY_ISSUE',
+    });
+  }
+
    @SubscribeMessage('session.heartbeat')
     async handleHeartbeat(@ConnectedSocket() client: Socket)
     {
-      const userId = client.data.userId;
-      if (!userId) return;
-      await this.sessionService.heartbeat(userId);
+      const customerId = client.data.customerId;
+      if (!customerId) return;
+      await this.sessionService.heartbeat(customerId);
     }
 }

@@ -1,16 +1,36 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from 'src/prisma/prisma.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { AddProductImageDto } from './dto/add-product-image.dto';
 import { ProductFilterDto } from './dto/ProductFilter.dto';
-import { ResponseService } from 'src/common/services/response.service';
+import { RedisService } from '../common/redis/redis.service';
+import { ResponseService } from '../common/services/response.service';
+import { PrismaService } from '../prisma/prisma.service';
+
 
 
 @Injectable()
 export class ProductService {
-  constructor(private readonly prisma: PrismaService , private readonly response: ResponseService) { }
+  constructor(
+    private readonly prisma: PrismaService ,
+     private readonly response: ResponseService,
+    private readonly redisService: RedisService,
+  ) {}
 
+  private async invalidateAllProductsCache(): Promise<void> {
+  const keys = await this.redisService.getKeysByPattern('products:all:*');
+  await Promise.all(keys.map(key => this.redisService.del(key)));
+}
+
+  private getFilterKey(prefix: string, filter: ProductFilterDto): string {
+  return `${prefix}:${JSON.stringify(filter)}`;
+}
+private async invalidateVendorProductsCache(vendorId: number): Promise<void> {
+
+
+  const keys = await this.redisService.getKeysByPattern(`products:vendor:${vendorId}:*`);
+  await Promise.all(keys.map(key => this.redisService.del(key)));
+}
   //validate ownership and get product
   private async validateOwnershipAndGetProduct(userId: number, productId: number) {
     const vendor = await this.prisma.vendorProfile.findUnique({
@@ -45,6 +65,11 @@ export class ProductService {
   if (!vendor.isActive || !vendor.isVerified) {
     throw new ForbiddenException('Vendor profile is inactive or not verified');
   }
+    const cacheKey = this.getFilterKey(`products:vendor:${vendorId}`, filter);
+    const cached = await this.redisService.get(cacheKey);
+  if (cached) {
+    return this.response.success('Vendor products fetched successfully', cached);
+  }
 
   const { categoryId, tagIds, search, page = 1, limit = 10 } = filter;
 
@@ -67,12 +92,11 @@ export class ProductService {
     this.prisma.product.count({ where }),
   ]);
 
-  return this.response.success('Vendor products fetched successfully', {
-    data: products,
-    count: total,
-    page,
-    limit,
-  });
+    const result = { data: products, count: total, page, limit };
+
+    await this.redisService.set(cacheKey, result, 300);
+
+  return this.response.success('Vendor products fetched successfully', result);
 }
 
 
@@ -102,6 +126,8 @@ export class ProductService {
       },
       include: { category: true, tags: true, images: true },
     });
+      await this.invalidateVendorProductsCache(vendor.id);
+      await this.invalidateAllProductsCache();
 
     return this.response.created('Product created successfully', product);
   }
@@ -109,7 +135,8 @@ export class ProductService {
 
   // Update product: returns the updated product with relations
   async updateProduct(userId: number, productId: number, dto: Partial<UpdateProductDto>) {
-  await this.validateOwnershipAndGetProduct(userId, productId);
+       const { vendorId } = await this.validateOwnershipAndGetProduct(userId, productId);
+
 
   const updated = await this.prisma.product.update({
     where: { id: productId },
@@ -120,6 +147,8 @@ export class ProductService {
       category: true,
     },
   });
+  await this.redisService.del(`product:${productId}`);
+  await this.invalidateVendorProductsCache(vendorId);
 
   return this.response.success('Product updated successfully', updated);
 }
@@ -129,7 +158,8 @@ export class ProductService {
   // Delete product
   async deleteProduct(userId: number, productId: number) 
   {
-    await this.validateOwnershipAndGetProduct(userId, productId);
+      const { vendorId } = await this.validateOwnershipAndGetProduct(userId, productId);
+
 
     await this.prisma.$transaction(async (tx) => {
     
@@ -141,6 +171,9 @@ export class ProductService {
     await tx.product.delete({ where: { id: productId } });
   });
 
+    await this.redisService.del(`product:${productId}`);
+    await this.invalidateVendorProductsCache(vendorId);
+
     return this.response.success('Product deleted successfully');
   }
 
@@ -148,6 +181,10 @@ export class ProductService {
   // get product by id with relations
 
   async getProductById(id: number) {
+    const cacheKey = `product:${id}`;
+    const cached = await this.redisService.get(cacheKey);
+  if (cached) return this.response.success('Product fetched successfully', cached);
+
     const product = await this.prisma.product.findUnique({
       where: { id },
       include: {
@@ -162,11 +199,19 @@ export class ProductService {
       throw new NotFoundException('Product not found or unavailable');
     }
 
+    await this.redisService.set(cacheKey, product, 600);
+
     return this.response.success('Product fetched successfully', product);
   }
 
   //get all products with filters
-  async getAllProducts(filter: ProductFilterDto) {
+  async getAllProducts(filter: ProductFilterDto) 
+  {
+    const cacheKey = this.getFilterKey('products:all', filter);
+    const cached = await this.redisService.get(cacheKey);
+  if (cached) {
+    return this.response.success('Products fetched successfully', cached);
+  }
   const { categoryId, tagIds, search, page = 1, limit = 10 } = filter;
 
   const where: any = {
@@ -188,13 +233,12 @@ export class ProductService {
     }),
     this.prisma.product.count({ where }),
   ]);
+    const result = { data: products, count: total, page, limit };
 
-  return this.response.success('Products fetched successfully', {
-    data: products,
-    count: total,
-    page,
-    limit,
-  });
+
+  await this.redisService.set(cacheKey, result, 300);
+
+  return this.response.success('Products fetched successfully', result);
 }
 
 

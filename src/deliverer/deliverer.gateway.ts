@@ -3,10 +3,12 @@ import { Server, Socket } from 'socket.io';
 import { Logger, UseFilters } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { DelivererJobService } from './deliverer-job.service';
-import { ReconnectService } from 'src/common/websocket/reconnect.service';
-import { SessionService } from 'src/common/websocket/session.service';
-import { ReplayService } from 'src/common/websocket/reply.service';
-import { GlobalWsExceptionFilter } from 'src/common/filters/ws-exception.filter';
+import { GlobalWsExceptionFilter } from '../common/filters/ws-exception.filter';
+import { RedisService } from '../common/redis/redis.service';
+import { ReconnectService } from '../common/websocket/reconnect.service';
+import { ReplayService } from '../common/websocket/reply.service';
+import { SessionService } from '../common/websocket/session.service';
+
 
 
 @WebSocketGateway({ namespace: 'deliverer', cors: true })
@@ -14,7 +16,7 @@ import { GlobalWsExceptionFilter } from 'src/common/filters/ws-exception.filter'
 export class DelivererGateway implements OnGatewayConnection, OnGatewayDisconnect
 {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
   private readonly logger = new Logger(DelivererGateway.name);
 
@@ -23,7 +25,8 @@ export class DelivererGateway implements OnGatewayConnection, OnGatewayDisconnec
     private readonly delivererJobService: DelivererJobService,
     private readonly reconnectService: ReconnectService,
     private readonly sessionService: SessionService,
-    private readonly replayService: ReplayService
+    private readonly replayService: ReplayService,
+    private readonly redisService: RedisService,
   ) {}
 
   async handleConnection(client: Socket) {
@@ -165,12 +168,26 @@ export class DelivererGateway implements OnGatewayConnection, OnGatewayDisconnec
 
     if (!allowed) return;
 
+    await this.redisService.set(
+    `location:deliverer:${delivererId}`,
+    { lat: data.lat, lng: data.lng, timestamp: new Date() },
+    30,
+  );
+
     this.server.to(`job:${data.jobId}`).emit('location:update', {
       lat: data.lat,
       lng: data.lng,
       timestamp: new Date(),
     });
   }
+
+  async getDelivererLocation(delivererId: number) {
+  return this.redisService.get<{
+    lat: number;
+    lng: number;
+    timestamp: Date;
+  }>(`location:deliverer:${delivererId}`);
+}
 
   @SubscribeMessage('session.heartbeat')
   async handleHeartbeat(@ConnectedSocket() client: Socket)

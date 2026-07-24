@@ -16,14 +16,22 @@ import { HealthController } from './health/health.controller';
 import { EventsModule } from './common/events/events.module';
 import { WebsocketModule } from './common/websocket/websocket.module';
 import { LoggerModule } from './common/logger/app-logger.module';
+import { ConfigModule } from '@nestjs/config';
+import { RedisModule } from './common/redis/redis.module';
+import { BullMQModule } from './common/bullmq/bullmq.module';
 
 
 @Module({
   imports: [
     WebsocketModule,
     LoggerModule,
+    RedisModule,
+    BullMQModule,
     UsersModule, AuthModule, VendorModule, ProductModule, CommonModule, AdminModule, OrderModule, DelivererModule,TimeLineModule,RecoveryModule,EventsModule,
      ScheduleModule.forRoot(),
+     ConfigModule.forRoot({
+      isGlobal: true, 
+    }),
   ],
   controllers: [AppController,HealthController],
   providers: [AppService],

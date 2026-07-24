@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from 'src/prisma/prisma.service';
 import { ReconnectEnvelope } from './reconnect.types';
 import { JobStatus, OrderStatus } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class ReconnectService {
@@ -49,6 +49,8 @@ export class ReconnectService {
     ReconnectEnvelope<{
       jobId: number;
       status: JobStatus;
+      assignedAt: Date;
+      totalOrders: number | null;
       stops: {
         id: number;
         status: string;
@@ -61,7 +63,7 @@ export class ReconnectService {
       where: {
         delivererId,
         status: {
-          in: ['IN_PROGRESS'],
+          in: ['ASSIGNED', 'IN_PROGRESS'],
         },
       },
       include: {
@@ -78,6 +80,8 @@ export class ReconnectService {
         ? {
           jobId: activeJob.id,
           status: activeJob.status,
+          assignedAt: activeJob.assignedAt,
+          totalOrders: activeJob.totalOrders ?? null,
           stops: activeJob.stops.map(stop => ({
             id: stop.id,
             status: stop.status,

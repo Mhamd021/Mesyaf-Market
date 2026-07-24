@@ -2,17 +2,18 @@ import { JwtService } from '@nestjs/jwt';
 import { ConnectedSocket, OnGatewayConnection, SubscribeMessage, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { VendorService } from './vendor.service';
-import { ReconnectService } from 'src/common/websocket/reconnect.service';
 import { Logger, UseFilters } from '@nestjs/common';
-import { SessionService } from 'src/common/websocket/session.service';
-import { ReplayService } from 'src/common/websocket/reply.service';
-import { GlobalWsExceptionFilter } from 'src/common/filters/ws-exception.filter';
+import { GlobalWsExceptionFilter } from '../common/filters/ws-exception.filter';
+import { ReconnectService } from '../common/websocket/reconnect.service';
+import { ReplayService } from '../common/websocket/reply.service';
+import { SessionService } from '../common/websocket/session.service';
+
 
 @WebSocketGateway({ namespace: 'vendor', cors: true })
 @UseFilters(GlobalWsExceptionFilter)
 export class VendorGateway implements OnGatewayConnection {
   @WebSocketServer()
-  server: Server;
+  server!: Server;
 
 
   private readonly logger = new Logger(VendorGateway.name);

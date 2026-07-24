@@ -3,11 +3,12 @@ import { CreateVendorProfileDto } from './dto/create-vendor-profile.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { Role } from '../common/enums/role.enum';
 import { UpdateVendorProfileDto } from './dto/update-vendor-profile.dto';
-import { ResponseService } from 'src/common/services/response.service';
 import { OrderStatus } from '@prisma/client';
-import { CustomerGateway } from 'src/users/customer.gateway';
-import { EVENTS } from 'src/common/events/events.constants';
-import { EventLogService } from 'src/common/events/event-log.service';
+import { EventLogService } from '../common/events/event-log.service';
+import { EVENTS } from '../common/events/events.constants';
+import { ResponseService } from '../common/services/response.service';
+import { CustomerGateway } from '../users/customer.gateway';
+
 
 
 @Injectable()

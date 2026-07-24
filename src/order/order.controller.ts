@@ -1,10 +1,11 @@
 import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { OrderService } from './order.service';
 import { CreateOrderDto } from './dto/create_order.dto';
-import { Roles } from 'src/common/decorators/roles.decorator';
 import { AuthGuard } from '@nestjs/passport';
-import { RolesGuard } from 'src/common/guards/roles.guard';
-import { Role } from 'src/common/enums/role.enum';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Role } from '../common/enums/role.enum';
+
 
 
 @Controller('order')
@@ -40,7 +41,12 @@ testError() {
         return this.orderService.vendorMarkReady(orderId,req.user.id);
     }
 
-   
+   @Get('test-batch/:batchId')
+@UseGuards(AuthGuard('jwt'))
+async testBatch(@Param('batchId') batchId: string) {
+  await this['orderService']['closeBatch'](+batchId);
+  return { message: 'closeBatch triggered', batchId: +batchId };
+}
     
 
 

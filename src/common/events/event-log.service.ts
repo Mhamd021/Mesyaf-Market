@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaService } from 'src/prisma/prisma.service';
 import { EventEntityType } from '@prisma/client';
 import { OrderTimelineProjectionService } from '../timeline/order-timeline.projection.service';
 import { JobTimelineProjectionService } from '../timeline/job-timeline.projection.service';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
 export class EventLogService {

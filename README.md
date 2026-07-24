@@ -41,13 +41,13 @@ The system handles the full order lifecycle — from creation and vendor eligibi
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│   Clients: Customer · Vendor · Deliverer · Admin          │
+│   Clients: Customer · Vendor · Deliverer · Admin         │
 └───────────────┬──────────────────┬───────────────────────┘
                 │  REST            │  WebSocket
                 ▼                  ▼
 ┌──────────────────────────────────────────────────────────┐
-│   NestJS API Gateway                                      │
-│   JWT Auth Guards · Role-based Access Control (4 roles)   │
+│   NestJS API Gateway                                     │
+│   JWT Auth Guards · Role-based Access Control (4 roles)  │
 └──────┬──────────────┬──────────────┬──────────┬──────────┘
        │              │              │          │
        ▼              ▼              ▼          ▼
@@ -57,8 +57,8 @@ The system handles the full order lifecycle — from creation and vendor eligibi
                                customer
        │              │              │
        └──────────────┴──────────────┘
-                       │
-                       ▼
+                      │
+                      ▼
           ┌─────────────────────────┐
           │  PostgreSQL + Prisma    │
           │  Event Log (immutable   │
@@ -319,6 +319,22 @@ Highest-value areas for future coverage (in priority order):
 - **CI pipeline:** GitHub Actions for linting, tests, and Prisma schema checks on every push.
 
 ---
+CURRENT FLOW (synchronous):
+Order created
+  → batch engine closes batch
+  → findAvailableDeliverer() called immediately
+  → deliverer assigned in same request
+  → HTTP response returned
+
+NEW FLOW (asynchronous):
+Order created
+  → batch engine closes batch
+  → job added to queue: { batchId, orderIds, location }
+  → HTTP response returned immediately ← customer gets response faster
+  → [background] worker picks up job
+  → worker calls findAvailableDeliverer()
+  → worker assigns deliverer
+  → worker emits Socket.IO event to notify deliverer
 
 ## Contributing
 

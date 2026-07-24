@@ -1,12 +1,13 @@
 import {Controller,Get,Patch,Body,Param,ParseIntPipe,UseGuards,Req, Query,} from '@nestjs/common';
 import { DelivererService } from './deliverer.service';
-import { Roles } from 'src/common/decorators/roles.decorator';
-import { RolesGuard } from 'src/common/guards/roles.guard';
-import { Role } from 'src/common/enums/role.enum';
+
 import { AuthGuard } from '@nestjs/passport';
 import { UpdateDelivererProfileDto } from './dto/update_deliverer.dto';
 import { JobStatus } from '@prisma/client';
 import { DelivererJobService } from './deliverer-job.service';
+import { Roles } from '../common/decorators/roles.decorator';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { Role } from '../common/enums/role.enum';
 
 @Controller('deliverer')
 export class DelivererController {

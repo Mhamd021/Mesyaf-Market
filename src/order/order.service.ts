@@ -2,12 +2,15 @@ import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nest
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOrderDto } from './dto/create_order.dto';
 import { Order, OrderStatus, OrderType } from '@prisma/client';
-import { DelivererAssignmentService } from 'src/deliverer/deliverer-assignment.service';
-import { VendorGateway } from 'src/vendor/vendor.gateway';
-import { CustomerGateway } from 'src/users/customer.gateway';
-import { EventLogService } from 'src/common/events/event-log.service';
-import { EVENTS } from 'src/common/events/events.constants';
-import { AppLogger } from 'src/common/logger/app-logger.service';
+import { DelivererAssignmentService } from '../deliverer/deliverer-assignment.service';
+import { VendorGateway } from '../vendor/vendor.gateway';
+import { CustomerGateway } from '../users/customer.gateway';
+import { EventLogService } from '../common/events/event-log.service';
+import { AppLogger } from '../common/logger/app-logger.service';
+import { EVENTS } from '../common/events/events.constants';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
+import { QUEUES, JOBS } from '../common/constants/queues';
 
 @Injectable()
 export class OrderService 
@@ -77,11 +80,12 @@ private estimateDelay(order, batchOrders, speedKmPerHour = 30)
   return delay;     
 }
     constructor(private readonly prisma: PrismaService,
-      private readonly delivererAssignment: DelivererAssignmentService,
       private readonly vendorGateway:VendorGateway,
       private readonly costumerGateway:CustomerGateway,
       private readonly eventLogService: EventLogService,
       private readonly logger: AppLogger,
+      @InjectQueue(QUEUES.DELIVERER_ASSIGNMENT)
+      private assignmentQueue: Queue,
     )
     {
           this.logger.setContext(OrderService.name);
@@ -130,12 +134,11 @@ private estimateDelay(order, batchOrders, speedKmPerHour = 30)
     this.vendorGateway.sendNewOrder(order.vendorId, order);
 
     return order;
-      } catch (e) {
+      } catch(error) {
         this.logger.error('createOrderFailed',{
-          error: e.message,
-          stack: e.stack
+          error
         } as any);
-        throw e;
+        throw error;
       }
       
     }
@@ -206,8 +209,7 @@ private estimateDelay(order, batchOrders, speedKmPerHour = 30)
     catch(e)
     {
       this.logger.error('VendorMarkOrderReadyFailed',{
-        error:e.message,
-        stack:e.stack
+        error: e
       });
       throw e;
     }
@@ -318,7 +320,17 @@ private async closeBatch(batchId: number) {
       batchId:batchId,
     });
 
-  await this.delivererAssignment.assignDelivererToBatch(batchId);
+  await this.assignmentQueue.add(
+      JOBS.ASSIGN_DELIVERER,
+      { batchId },
+      {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: true,
+        removeOnFail: false,
+      },
+    );
+    this.logger.log(`AssignmentJobQueued`, { batchId });
 
 }
 

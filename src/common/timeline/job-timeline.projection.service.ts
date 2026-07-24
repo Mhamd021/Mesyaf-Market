@@ -1,8 +1,8 @@
 import {  Injectable, Logger } from "@nestjs/common";
 import { EventLog, Prisma } from "@prisma/client";
-import { EVENTS } from "src/common/events/events.constants";
-import { PrismaService } from "src/prisma/prisma.service";
 import { AppLogger } from "../logger/app-logger.service";
+import { PrismaService } from "../../prisma/prisma.service";
+import { EVENTS } from "../events/events.constants";
 
 @Injectable()
 export class JobTimelineProjectionService {
@@ -53,6 +53,10 @@ export class JobTimelineProjectionService {
         return 'Delivery started';
       case EVENTS.JOB.COMPLETED:
         return 'Delivery completed';
+      case EVENTS.JOB.RECOVERED:
+        return 'Delivery assignment recovered after deliverer timeout';
+      case EVENTS.JOB.ESCALATED:
+        return 'Delivery issue escalated for manual intervention';
       default:
         return event.eventType;
     }
