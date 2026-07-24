@@ -312,19 +312,13 @@ Highest-value areas for future coverage (in priority order):
 ## What I Would Improve Next
 
 - **Test coverage:** Unit tests for `OrderService` and `DelivererJobService` state machines. E2E tests for the 5 critical flows (register → order → ready → job start → drop-off complete).
-- **Job queue:** Move deliverer assignment from synchronous to Bull/BullMQ to handle load gracefully.
 - **Rate limiting:** Per-role limits on WebSocket gateways to prevent event flooding.
 - **Observability:** Structured logging with correlation IDs across the full order lifecycle.
 - **API documentation:** OpenAPI/Swagger spec generated from NestJS decorators.
 - **CI pipeline:** GitHub Actions for linting, tests, and Prisma schema checks on every push.
 
 ---
-CURRENT FLOW (synchronous):
-Order created
-  → batch engine closes batch
-  → findAvailableDeliverer() called immediately
-  → deliverer assigned in same request
-  → HTTP response returned
+
 
 NEW FLOW (asynchronous):
 Order created
