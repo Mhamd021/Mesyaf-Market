@@ -7,6 +7,7 @@ import { GlobalWsExceptionFilter } from '../common/filters/ws-exception.filter';
 import { ReconnectService } from '../common/websocket/reconnect.service';
 import { ReplayService } from '../common/websocket/reply.service';
 import { SessionService } from '../common/websocket/session.service';
+import { AppLogger } from '../common/logger/app-logger.service';
 
 
 @WebSocketGateway({ namespace: 'vendor', cors: true })
@@ -16,12 +17,13 @@ export class VendorGateway implements OnGatewayConnection {
   server!: Server;
 
 
-  private readonly logger = new Logger(VendorGateway.name);
+  
 
   constructor(private readonly jwtservice: JwtService, private readonly vendor: VendorService,
     private readonly reconnectService: ReconnectService,
     private readonly sessionService: SessionService,
-    private readonly replayService: ReplayService
+    private readonly replayService: ReplayService,
+    private readonly logger: AppLogger
 
   ) { }
 

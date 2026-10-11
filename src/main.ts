@@ -1,19 +1,30 @@
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/global-exception.filter';
 import { AppLogger } from './common/logger/app-logger.service';
-import { randomUUID } from 'crypto';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bufferLogs: true });
 
-  const logger = app.get(AppLogger);
+  const logger = await app.resolve(AppLogger);
+  logger.setContext('Bootstrap');
+  app.useLogger(logger);
+
+  const httpLogger = await app.resolve(AppLogger);
+  httpLogger.setContext('Http');
+
+  const filterLogger = await app.resolve(AppLogger);
+  filterLogger.setContext('GlobalExceptionFilter');
+
+  app.set('trust proxy', 1);
+  app.enableShutdownHooks(); 
 
   app.use((req: any, res: any, next: any) => {
     const requestId =
-      typeof req.headers['x-request-id'] === 'string' &&
-      req.headers['x-request-id'].length > 0
+      typeof req.headers['x-request-id'] === 'string' && req.headers['x-request-id'].length > 0
         ? req.headers['x-request-id']
         : randomUUID();
 
@@ -22,7 +33,7 @@ async function bootstrap() {
 
     const startedAt = Date.now();
     res.on('finish', () => {
-      logger.log('HttpRequest', {
+      httpLogger.log('HttpRequest', {
         requestId,
         method: req.method,
         path: req.originalUrl ?? req.url,
@@ -36,23 +47,19 @@ async function bootstrap() {
     next();
   });
 
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-    }),
-  );
-
-  app.useGlobalFilters(new GlobalExceptionFilter(logger));
+  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }));
+  app.useGlobalFilters(new GlobalExceptionFilter(filterLogger));
 
   process.on('unhandledRejection', (reason) => {
     logger.error('UnhandledRejection', { reason });
   });
 
-  process.on('uncaughtException', (err) => {
-    logger.error('UncaughtException', { error: err.message, stack: err.stack });
+  process.on('uncaughtException', (error) => {
+    logger.error('UncaughtException', { error });
+    process.exit(1);
   });
 
   await app.listen(process.env.PORT ?? 3000);
+  logger.log('ServerStarted', { port: process.env.PORT ?? 3000 });
 }
 bootstrap();

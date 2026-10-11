@@ -15,12 +15,11 @@ import { QUEUES } from '../constants/queues';
         },
       }),
     }),
-    BullModule.registerQueue({
-      name: QUEUES.DELIVERER_ASSIGNMENT,
-    }),
+    BullModule.registerQueue(
+      { name: QUEUES.DELIVERER_ASSIGNMENT },
+      { name: QUEUES.BATCH_TIMEOUT },
+    ),
   ],
-  exports: [
-    BullModule,
-  ],
+  exports: [BullModule],
 })
 export class BullMQModule {}

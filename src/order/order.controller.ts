@@ -5,6 +5,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Role } from '../common/enums/role.enum';
+import { Throttle } from '@nestjs/throttler';
 
 
 
@@ -17,10 +18,9 @@ export class OrderController
 testError() {
   throw new Error('Something broke');
 }
-
-
-    @Post('/:vendorId')
     @UseGuards(AuthGuard('jwt'))
+    @Throttle({ default: {limit:10,ttl:60000}})
+    @Post('/:vendorId')
     async createOrder(@Req()req ,@Param('vendorId', ParseIntPipe) vendorId: number ,@Body() dto: CreateOrderDto)
     {
         return this.orderService.createOrder(dto , vendorId , req.user.id);

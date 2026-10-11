@@ -7,6 +7,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { CreateVendorProfileDto } from './dto/create-vendor-profile.dto';
 import { UpdateVendorProfileDto } from './dto/update-vendor-profile.dto';
 import { OrderStatus } from '@prisma/client';
+import { Throttle } from '@nestjs/throttler';
 
 @Controller('vendor')
 export class VendorController {
@@ -90,7 +91,8 @@ export class VendorController {
     return this.vendorService.getVendorOrders(req.user.id, status);
   }
 
-     @Post('orders/:orderId/accept')
+@Throttle({default:{limit:30,ttl:60000}})
+@Post('orders/:orderId/accept')
 vendorAcceptOrder(
   @Param('orderId', ParseIntPipe) orderId: number,
   @Req() req,
@@ -101,6 +103,7 @@ vendorAcceptOrder(
   );
 }
 
+@Throttle({default:{limit:30,ttl:60000}})
 @Post('orders/:orderId/reject')
 vendorRejectOrder(
   @Param('orderId', ParseIntPipe) orderId: number,

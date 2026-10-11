@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {  Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Role } from '../common/enums/role.enum';
 import { ResponseService } from '../common/services/response.service';
@@ -75,18 +75,15 @@ async getPendingVendors() {
   return this.response.success('Pending vendor applications retrieved successfully', pending);
 }
 
-//deliverer management functions 
 async promoteUserToDeliverer(userId: number) {
   const user = await this.prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new NotFoundException('User not found');
 
-  // Update role
   await this.prisma.user.update({
     where: { id: userId },
     data: { role: Role.DELIVERER },
   });
 
-  // Create profile with fixed defaults
   const profile = await this.prisma.delivererProfile.create({
     data: {
       userId,
@@ -96,7 +93,10 @@ async promoteUserToDeliverer(userId: number) {
     },
   });
 
-  return this.response.success('User promoted to Deliverer and profile created', profile);
+  return this.response.success(
+  'User promoted to Deliverer. They must log out and log back in for the change to take effect.',
+  profile,
+);
 }
 
 async removeDeliverer(userId: number) {

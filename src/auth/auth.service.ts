@@ -5,6 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ResponseService } from '../common/services/response.service';
+import { DelivererProfile, User } from '@prisma/client/wasm';
 
 @Injectable()
 export class AuthService {
@@ -35,12 +36,13 @@ export class AuthService {
     return this.response.success('Login successful', this.generateToken(user));
   }
 
-  private generateToken(user: any) {
-    
-    const payload = { sub: user.id, email: user.email, role: user.role };
-    
-    return {
-      access_token: this.jwtService.sign(payload),
-    };
-  }
+  private generateToken(user: User & { delivererProfile?: DelivererProfile | null }) {
+  const payload = {
+    sub: user.id,
+    email: user.email,
+    role: user.role,
+    delivererId: user.delivererProfile?.id ?? null,
+  };
+  return { access_token: this.jwtService.sign(payload) };
+}
 }

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { EventEntityType } from '@prisma/client';
+import { EventEntityType, Prisma } from '@prisma/client';
 import { OrderTimelineProjectionService } from '../timeline/order-timeline.projection.service';
 import { JobTimelineProjectionService } from '../timeline/job-timeline.projection.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -17,8 +17,11 @@ export class EventLogService {
     entityId: number;
     eventType: string;
     payload: any;
-  }) {
-    const event = await this.prisma.eventLog.create({
+  },
+tx?: Prisma.TransactionClient,
+) {
+    const client = tx ?? this.prisma;
+    const event = await client.eventLog.create({
       data: {
         entityType: params.entityType,
         entityId: params.entityId,
@@ -30,11 +33,12 @@ export class EventLogService {
     switch (event.entityType) 
     {
     case EventEntityType.ORDER:
-      await this.orderTimelineProjection.project(event);
+      await this.orderTimelineProjection.project(event, tx);
       break;
 
     case EventEntityType.JOB:
-      await this.jobTimelineProjection.project(event);
+              await this.jobTimelineProjection.project(event, tx);
+
       break;
   }
 

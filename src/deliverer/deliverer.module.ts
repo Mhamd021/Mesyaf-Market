@@ -10,23 +10,21 @@ import { LoggerModule } from '../common/logger/app-logger.module';
 import { WebsocketModule } from '../common/websocket/websocket.module';
 import { UsersModule } from '../users/users.module';
 import { DelivererJobService } from './deliverer-job.service';
-import { QUEUES } from '../common/constants/queues';
-import { BullModule } from '@nestjs/bullmq';
 import { DelivererAssignmentProcessor } from './deliverer-assignment.processor';
+import { DelivererLocationService } from './deliverer-location-service';
 
 
 
 @Module({
    imports: [CommonModule,AuthModule,WebsocketModule,UsersModule,EventsModule,LoggerModule,
 
-    BullModule.registerQueue({
-      name: QUEUES.DELIVERER_ASSIGNMENT,
-    }),
+  
    ],
   controllers: [DelivererController],
-  providers: [DelivererService, DelivererAssignmentService,DelivererGateway,DelivererJobService,DelivererAssignmentProcessor],
+  providers: [DelivererService, DelivererAssignmentService,DelivererGateway,DelivererJobService,DelivererAssignmentProcessor,DelivererLocationService],
   exports: [
     DelivererAssignmentService,
+    DelivererLocationService
   ],
 })
 export class DelivererModule {}

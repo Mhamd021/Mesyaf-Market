@@ -19,10 +19,17 @@ import { LoggerModule } from './common/logger/app-logger.module';
 import { ConfigModule } from '@nestjs/config';
 import { RedisModule } from './common/redis/redis.module';
 import { BullMQModule } from './common/bullmq/bullmq.module';
+import {  ThrottlerModule } from '@nestjs/throttler';
+import { RedisThrottlerStorage } from './common/throttler/redis-throttler.storage';
+import { RedisService } from './common/redis/redis.service';
+import { CostumThrottlerGuard } from './common/throttler/costum-throttler-guard';
+
+
 
 
 @Module({
   imports: [
+
     WebsocketModule,
     LoggerModule,
     RedisModule,
@@ -32,9 +39,34 @@ import { BullMQModule } from './common/bullmq/bullmq.module';
      ConfigModule.forRoot({
       isGlobal: true, 
     }),
+    ThrottlerModule.forRootAsync({
+      imports: [RedisModule],
+      inject:[RedisService],
+      useFactory: (redisService: RedisService) => ({
+        throttlers: [
+          {
+            name: 'default',
+            ttl: 60000,   
+            limit: 10,
+          },
+          {
+            name: 'login',
+            ttl: 900000,
+            limit: 5,
+          },
+        ],
+        storage: new RedisThrottlerStorage(redisService),
+      }),
+    })
+    
   ],
   controllers: [AppController,HealthController],
-  providers: [AppService],
+  providers: [AppService,RedisThrottlerStorage,
+    {
+      provide : 'APP_GUARD',
+      useClass : CostumThrottlerGuard
+    }
+  ],
   
 })
 export class AppModule {}

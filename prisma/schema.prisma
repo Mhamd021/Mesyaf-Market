@@ -222,7 +222,7 @@ model DeliveryDropOff {
   id          Int       @id @default(autoincrement())
   jobId       Int
   orderId     Int
-  sequence    Int // stop index in route
+  sequence    Int 
   status      JobStatus @default(PENDING)
   dropoffLat  Float?
   dropoffLng  Float?
@@ -285,6 +285,7 @@ model EventLog {
 model OrderTimeline {
   id          Int       @id @default(autoincrement())
   orderId     Int
+  sourceEventId Int? @unique
   eventType   String
   status      OrderStatus?
   message     String
@@ -299,6 +300,7 @@ model OrderTimeline {
 model JobTimeline {
   id          Int      @id @default(autoincrement())
   jobId       Int
+  sourceEventId Int? @unique
   eventType   String
   message     String
   payload     Json? 
@@ -309,3 +311,4 @@ model JobTimeline {
 }
 
 
+//add source event id (event id) to the JobTimeline and OrderTimeline tables and check using it.

@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/commo
 import {  Role } from "@prisma/client";
 import { PrismaService } from "../../prisma/prisma.service";
 
+
 @Injectable()
 export class JobTimelineQueryService {
   constructor(private prisma: PrismaService) {}

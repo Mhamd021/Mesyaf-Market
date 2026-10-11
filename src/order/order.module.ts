@@ -6,18 +6,17 @@ import { LoggerModule } from '../common/logger/app-logger.module';
 import { DelivererModule } from '../deliverer/deliverer.module';
 import { UsersModule } from '../users/users.module';
 import { VendorModule } from '../vendor/vendor.module';
-import { BullModule } from '@nestjs/bullmq';
-import { QUEUES } from '../common/constants/queues';
+import { BatchTimeoutProcessor } from './batch-timeout-processor';
+
+
 
 
 
 @Module({
   controllers: [OrderController],
-  providers: [OrderService],
+  providers: [OrderService, BatchTimeoutProcessor],
   imports: [DelivererModule,EventsModule,VendorModule,UsersModule,LoggerModule,
-    BullModule.registerQueue({
-      name: QUEUES.DELIVERER_ASSIGNMENT,
-    }),
+    
   ],
 })
 export class OrderModule {}

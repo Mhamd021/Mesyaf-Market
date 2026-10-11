@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Scope } from "@nestjs/common";
 import { Cron } from "@nestjs/schedule";
 import { JobStatus, OrderStatus } from "@prisma/client";
 import { DelivererAssignmentService } from "../../../deliverer/deliverer-assignment.service";
@@ -7,10 +7,15 @@ import { CustomerGateway } from "../../../users/customer.gateway";
 import { EventLogService } from "../../events/event-log.service";
 import { EVENTS } from "../../events/events.constants";
 import { AppLogger } from "../../logger/app-logger.service";
+import { InjectQueue } from "@nestjs/bullmq";
+import { Queue } from "bullmq";
+import { JOBS, QUEUES } from "../../constants/queues";
 
 @Injectable()
 export class DelivererRecoveryService {
   DELIVERER_GRACE_MS = 2 * 60 * 1000;
+  STUCK_BATCH_MIN_AGE_MS = 60 * 1000;
+
 
   constructor(
     private prisma: PrismaService,
@@ -18,15 +23,28 @@ export class DelivererRecoveryService {
     private delivererAssignment: DelivererAssignmentService,
     private customerGateway: CustomerGateway,
     private logger: AppLogger,
+    @InjectQueue(QUEUES.DELIVERER_ASSIGNMENT) private assignmentQueue: Queue,
+
   ) {
-    this.logger.setContext(DelivererRecoveryService.name);
+   
   }
 
   @Cron("*/1 * * * *")
-  async checkDeliverers() {
+async checkDeliverers() {
+  try {
     await this.checkStaleDeliverers();
-    this.logger.log("Running deliverer recovery check");
+  } catch (e) {
+    this.logger.error("StaleDelivererCheckFailed", { error: e } as any);
   }
+
+  try {
+    await this.requeueStuckBatches();
+  } catch (e) {
+    this.logger.error("StuckBatchSweepFailed", { error: e } as any);
+  }
+
+  this.logger.log("Running deliverer recovery check");
+}
 
   async checkStaleDeliverers() {
     const cutoff = new Date(Date.now() - this.DELIVERER_GRACE_MS);
@@ -59,8 +77,12 @@ export class DelivererRecoveryService {
     });
 
     for (const deliverer of deliverers) {
-      await this.handleDeliverer(deliverer);
-    }
+  try {
+    await this.handleDeliverer(deliverer);
+  } catch (error) {
+    this.logger.warn('DelivererRecoverySkipped', { delivererId: deliverer.id, error });
+  }
+}
   }
 
   async handleDeliverer(deliverer: any) {
@@ -123,8 +145,12 @@ export class DelivererRecoveryService {
         reason: "DELIVERER_TIMEOUT_BEFORE_START",
       },
     });
-
-    await this.delivererAssignment.assignDelivererToBatch(job.batchId);
+    try{
+          await this.delivererAssignment.assignDelivererToBatch(job.batchId);
+    }catch(error)
+    {
+      this.logger.error('DelivererReassignmentFailed', { batchId: job.batchId, error });
+    }
   }
 
   async escalateStartedJob(deliverer: any, job: any) {
@@ -179,4 +205,37 @@ export class DelivererRecoveryService {
       affectedOrders: (job.orders ?? []).length,
     });
   }
+  async requeueStuckBatches() {
+  const cutoff = new Date(Date.now() - this.STUCK_BATCH_MIN_AGE_MS);
+
+  const stuck = await this.prisma.deliveryBatch.findMany({
+    where: {
+      status: JobStatus.IN_PROGRESS,
+      delivererId: null,
+      createdAt: { lt: cutoff }, 
+    },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  if (stuck.length === 0) return;
+
+  const freeDeliverers = await this.prisma.delivererProfile.count({
+    where: { availability: true, activeJobId: null },
+  });
+  if (freeDeliverers === 0) return; 
+
+  for (const batch of stuck.slice(0, freeDeliverers)) {
+    await this.assignmentQueue.add(
+      JOBS.ASSIGN_DELIVERER,
+      { batchId: batch.id },
+      {
+        attempts: 3,
+        backoff: { type: "exponential", delay: 5000 },
+        removeOnComplete: true,
+        removeOnFail: false,
+      },
+    );
+    this.logger.warn("StuckBatchRequeued", { batchId: batch.id });
+  }
+}
 }

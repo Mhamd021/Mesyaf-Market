@@ -3,14 +3,15 @@ import { Job } from 'bullmq';
 import { Logger } from '@nestjs/common';
 import { DelivererAssignmentService } from './deliverer-assignment.service';
 import { QUEUES } from '../common/constants/queues';
+import { AppLogger } from '../common/logger/app-logger.service';
 
 
 @Processor(QUEUES.DELIVERER_ASSIGNMENT)
 export class DelivererAssignmentProcessor extends WorkerHost {
-  private readonly logger = new Logger(DelivererAssignmentProcessor.name);
 
   constructor(
     private readonly assignmentService: DelivererAssignmentService,
+      private readonly logger: AppLogger
   ) {
       super();
   }

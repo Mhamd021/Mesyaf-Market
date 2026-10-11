@@ -14,7 +14,7 @@ import { CommonModule } from '../common/common.module';
     PassportModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET || 'supersecretkey', 
-      signOptions: { expiresIn: '1d' },
+      signOptions: { expiresIn: '7d' },
     }),
   ],
   providers: [AuthService, JwtStrategy],

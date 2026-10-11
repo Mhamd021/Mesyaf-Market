@@ -38,7 +38,7 @@ async function main() {
   });
   console.log('✅ Admin:', admin.email);
 
-  // 2 — Customer (Damascus coordinates)
+
   const customer = await prisma.user.create({
     data: {
       email: 'customer@test.com',
@@ -49,7 +49,6 @@ async function main() {
   });
   console.log('✅ Customer:', customer.email);
 
-  // 3 — Vendor user + profile
   const vendorUser = await prisma.user.create({
     data: {
       email: 'vendor@test.com',
@@ -63,15 +62,14 @@ async function main() {
     data: {
       userId: vendorUser.id,
       shopName: 'Test Shop',
-      latitude: 33.5100,   // ← your schema uses latitude/longitude
-      longitude: 36.2700,
+      latitude: 35.06197273,  
+      longitude: 36.338286284,
       isVerified: true,
       isActive: true,
     },
   });
   console.log('✅ Vendor:', vendorUser.email);
 
-  // 4 — Deliverer user + profile (available, near the vendor)
   const delivererUser = await prisma.user.create({
     data: {
       email: 'deliverer@test.com',
@@ -84,10 +82,10 @@ async function main() {
   await prisma.delivererProfile.create({
     data: {
       userId: delivererUser.id,
-      currentLat: 33.5115,   // ← your schema uses currentLat/currentLng
-      currentLng: 36.2710,
-      availability: true,    // ← available to be assigned
-      activeJobId: null,     // ← no active job
+      currentLat: 35.058723373814736,  
+      currentLng: 36.33788931767618,
+      availability: true,    
+      activeJobId: null,   
       maxConcurrentOrders: 3,
       maxStops: 5,
       acceptsBatching: true,
@@ -95,17 +93,46 @@ async function main() {
   });
   console.log('✅ Deliverer:', delivererUser.email);
 
-  // 5 — Category (required by Product)
+  const delivererUser2 = await prisma.user.create({
+    data: {
+      email: 'deliverer2@test.com',
+      password,
+      name: 'Test-Deliverer2',
+      role: Role.DELIVERER,
+    },
+  });
+
+  await prisma.delivererProfile.create({
+    data: {
+      userId: delivererUser2.id,
+      currentLat: 35.070367513306294,  
+      currentLng: 36.338452795103464,
+      availability: true,    
+      activeJobId: null,   
+      maxConcurrentOrders: 3,
+      maxStops: 5,
+      acceptsBatching: true,
+    },
+  });
+  console.log('✅ Deliverer:', delivererUser2.email);
+
+  
   const category = await prisma.category.create({
     data: {
       name: 'General',
     },
   });
   console.log('✅ Category:', category.name);
-
-  // 6 — Product
-  const product = await prisma.product.create({
+   const category2 = await prisma.category.create({
     data: {
+      name: 'Food',
+    },
+  });
+  console.log('✅ Category:', category2.name);
+
+  const products = await prisma.product.createMany({
+    data:[
+{
       vendorId: vendorProfile.id,
       categoryId: category.id,
       name: 'Test Product',
@@ -114,59 +141,18 @@ async function main() {
       condition: Condition.NEW,
       isAvailable: true,
     },
-  });
-  console.log('✅ Product:', product.name);
-
-  // 7 — Order (READY_FOR_DELIVERY so it can be batched)
-  const order = await prisma.order.create({
-    data: {
-      customerId: customer.id,
+    {
       vendorId: vendorProfile.id,
-      status: OrderStatus.READY_FOR_DELIVERY,
-      orderType: OrderType.GROCERY,
-      // Vendor coordinates — critical for deliverer assignment
-      vendorLat: vendorProfile.latitude,
-      vendorLng: vendorProfile.longitude,
-      // Customer coordinates — used for dropoff
-      customerLat: 33.5138,
-      customerLng: 36.2765,
-      customerAddress: 'Test Customer Address',
-      vendorAddress: 'Test Vendor Address',
-      orderItems: {
-        create: {
-          productId: product.id,
-          quantity: 1,
-          price: 25.00,
-        },
-      },
+      categoryId: category2.id,
+      name: 'Test-Food-Product',
+      price: 25.00,
+      stockQuantity: 100,
+      condition: Condition.NEW,
+      isAvailable: true,
     },
+    ] 
   });
-  console.log('✅ Order:', order.id, '| Status:', order.status);
-
-  // 8 — DeliveryBatch (PENDING — this is what closeBatch() will process)
-  const batch = await prisma.deliveryBatch.create({
-    data: {
-      status: JobStatus.PENDING,  // ← JobStatus enum not string
-      orders: {
-        connect: { id: order.id },
-      },
-    },
-  });
-  console.log('✅ DeliveryBatch:', batch.id, '| Status:', batch.status);
-
-  console.log('');
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log('🎯 TEST DATA READY');
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  console.log(`   BatchId to use in test: ${batch.id}`);
-  console.log(`   OrderId:                ${order.id}`);
-  console.log('');
-  console.log('   Credentials (password: password123)');
-  console.log(`   Admin:     admin@test.com`);
-  console.log(`   Customer:  customer@test.com`);
-  console.log(`   Vendor:    vendor@test.com`);
-  console.log(`   Deliverer: deliverer@test.com`);
-  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('✅ Product:', products);
 }
 
 main()
@@ -177,3 +163,6 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+
+
+ 

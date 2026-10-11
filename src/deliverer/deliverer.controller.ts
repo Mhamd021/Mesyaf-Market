@@ -21,6 +21,13 @@ export class DelivererController {
     return this.delivererService.getProfileByUserId(req.user.id);
   }
 
+ @Get('/jobs')
+@UseGuards(AuthGuard('jwt'))
+async getDelivererJobs(@Req() req, @Query('status') status?: JobStatus) 
+{
+  return this.delivererJobService.getDelivererJobs(req.user.id, status);
+}
+
   @Get(':userId')
   @UseGuards(RolesGuard)
   @Roles(Role.ADMIN)
@@ -38,11 +45,6 @@ export class DelivererController {
 
 
 
- @Get('/jobs')
-@UseGuards(AuthGuard('jwt'))
-async getDelivererJobs(@Req() req, @Query('status') status?: JobStatus) 
-{
-  return this.delivererJobService.getDelivererJobs(req.user.id, status);
-}
+
 
 }

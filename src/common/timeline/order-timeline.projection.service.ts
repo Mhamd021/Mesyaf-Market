@@ -1,5 +1,5 @@
-import { Injectable, Logger } from "@nestjs/common";
-import { EventLog, Prisma } from "@prisma/client";
+import { Injectable } from "@nestjs/common";
+import { EventLog, OrderStatus, Prisma } from "@prisma/client";
 import { AppLogger } from "../logger/app-logger.service";
 import { PrismaService } from "../../prisma/prisma.service";
 import { EVENTS } from "../events/events.constants";
@@ -9,40 +9,42 @@ export class OrderTimelineProjectionService {
   
 
   constructor(private prisma: PrismaService,private readonly logger:AppLogger) {
-    this.logger.setContext(OrderTimelineProjectionService.name);
   }
 
-  async project(event: EventLog) {
-    if (event.entityType !== 'ORDER') 
-      {
-        this.logger.warn('the event type is not an order');
-        return;
-      }
+  async project(event: EventLog,tx?: Prisma.TransactionClient) {
+      const client = tx ?? this.prisma;
 
-    const existing = await this.prisma.orderTimeline.findFirst({ 
-      where:
+    if (event.entityType !== 'ORDER') {
+    this.logger.warn('NotAnOrderEvent', { eventId: event.id });
+    return;
+  }
+
+    const raw = (event.payload as { status?: unknown } | null)?.status;
+  const status = Object.values(OrderStatus).includes(raw as OrderStatus)
+    ? (raw as OrderStatus)
+    : null;
+  if (raw !== undefined && status === null) {
+    this.logger.warn('InvalidOrderStatusInEvent', { eventId: event.id, raw });
+  }
+
+  const result = await client.orderTimeline.createMany({
+    data: [
       {
+        sourceEventId: event.id,
         orderId: event.entityId,
         eventType: event.eventType,
+        status,
+        payload: event.payload ?? Prisma.JsonNull,
         occurredAt: event.createdAt,
-      }
-    });
-    if (existing)
-      {
-        this.logger.warn('event already projected');
-        return;
-      } 
-
-    await this.prisma.orderTimeline.create({
-      data: {
-        orderId: event.entityId,
-        eventType: event.eventType,
-        status: (event.payload as any)?.status ?? null,
-       payload: event.payload ?? Prisma.JsonNull,
-        occurredAt: event.createdAt,
-        message: this.buildMessage(event),
+        message: this.buildMessage(event), 
       },
-    });
+    ],
+    skipDuplicates: true,
+  });
+
+  if (result.count === 0) {
+    this.logger.debug('EventAlreadyProjected', { eventId: event.id });
+  }
   }
 
   private buildMessage(event: EventLog): string {

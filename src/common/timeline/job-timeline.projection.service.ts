@@ -1,48 +1,41 @@
-import {  Injectable, Logger } from "@nestjs/common";
-import { EventLog, Prisma } from "@prisma/client";
-import { AppLogger } from "../logger/app-logger.service";
-import { PrismaService } from "../../prisma/prisma.service";
-import { EVENTS } from "../events/events.constants";
+import { Injectable } from '@nestjs/common';
+import { EventLog, Prisma } from '@prisma/client';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AppLogger } from '../logger/app-logger.service';
+import { EVENTS } from '../events/events.constants';
 
 @Injectable()
 export class JobTimelineProjectionService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly logger: AppLogger,
+  ) {}
 
-  
+  async project(event: EventLog, tx?: Prisma.TransactionClient) {
+    const client = tx ?? this.prisma;
 
-  constructor(private prisma: PrismaService,private readonly logger:AppLogger) {
-    this.logger.setContext(JobTimelineProjectionService.name);
-  }
+    if (event.entityType !== 'JOB') {
+      this.logger.warn('NotAJobEvent', { eventId: event.id });
+      return;
+    }
 
-  async project(event: EventLog) {
-    if (event.entityType !== 'JOB')
-      {
-        this.logger.warn('This is not a Job event');
-        return;
-      }
-
-    const existing = await this.prisma.jobTimeline.findFirst({ 
-      where:
-      {
-        jobId: event.entityId,
-        eventType: event.eventType,
-        occurredAt: event.createdAt,
-      }
+    const result = await client.jobTimeline.createMany({
+      data: [
+        {
+          sourceEventId: event.id,
+          jobId: event.entityId,
+          eventType: event.eventType,
+          payload: event.payload ?? Prisma.JsonNull,
+          occurredAt: event.createdAt,
+          message: this.buildMessage(event),
+        },
+      ],
+      skipDuplicates: true,
     });
-    if (existing)
-      {
-        this.logger.warn('event already projected');
-        return;
-      } 
 
-    await this.prisma.jobTimeline.create({
-      data: {
-        jobId: event.entityId,
-        eventType: event.eventType,
-        payload: event.payload ?? Prisma.JsonNull,
-        occurredAt: event.createdAt,
-        message: this.buildMessage(event),
-      },
-    });
+    if (result.count === 0) {
+      this.logger.debug('EventAlreadyProjected', { eventId: event.id });
+    }
   }
 
   private buildMessage(event: EventLog): string {
@@ -61,8 +54,4 @@ export class JobTimelineProjectionService {
         return event.eventType;
     }
   }
-
-  
 }
-
-
